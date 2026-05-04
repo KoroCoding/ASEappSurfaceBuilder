@@ -2,8 +2,9 @@
 set -euo pipefail
 
 script_dir="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
+repo_root="$(cd -- "${script_dir}/../.." && pwd)"
 build_dir="${script_dir}/build"
-dist_dir="${script_dir}/dist"
+dist_dir="${repo_root}/standalone_exe/macos"
 env_name="${ASEAPP_CONDA_ENV:-aseapp-surface-builder}"
 stage_dir="${ASEAPP_MACOS_STAGE_DIR:-/private/tmp/aseapp-surface-builder-cpack}"
 parallel="${ASEAPP_BUILD_PARALLEL:-$(sysctl -n hw.ncpu 2>/dev/null || echo 2)}"

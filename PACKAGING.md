@@ -8,6 +8,8 @@
 code/native_ui/                          # C++ / Qt ソースコード
 standalone_exe/windows/                  # Windows 単体配布EXE
 standalone_exe/windows/ASEappSurfaceBuilder-1.0.0-Windows.exe
+standalone_exe/macos/                    # macOS 配布DMG
+standalone_exe/macos/ASEappSurfaceBuilder-1.0.0-macOS.dmg
 requirements.txt                         # Python補助ツール用ライブラリ
 environment.yml                          # Conda環境構築用
 ```
@@ -19,7 +21,7 @@ GitHub Releases には次の名前でアップロードします。
 - Windows 単体 launcher: `standalone_exe/windows/ASEappSurfaceBuilder-1.0.0-Windows.exe`
 - Windows ZIP: `code/native_ui/dist/ASEappSurfaceBuilder-1.0.0-Windows.zip`
 - Linux: `code/native_ui/dist/ASEappSurfaceBuilder-1.0.0-Linux.tar.gz`
-- macOS: `code/native_ui/dist/ASEappSurfaceBuilder-1.0.0-macOS.dmg`
+- macOS: `standalone_exe/macos/ASEappSurfaceBuilder-1.0.0-macOS.dmg`
 
 Windows では通常、単体 launcher 版だけを配布すれば十分です。
 
@@ -120,10 +122,10 @@ macOS では次のスクリプトを使ってください。
 このスクリプトは、Release ビルド、Qt ランタイム同梱、自己署名、DMG 作成、署名検証、DMG 検証をまとめて実行し、次を作成します。
 
 ```text
-code/native_ui/dist/ASEappSurfaceBuilder-1.0.0-macOS.dmg
+standalone_exe/macos/ASEappSurfaceBuilder-1.0.0-macOS.dmg
 ```
 
-`Documents/GitHub` など macOS FileProvider 配下で直接 CPack staging を作ると、`com.apple.FinderInfo` などの拡張属性が `.app` に付いて `codesign` が失敗することがあります。そのため、スクリプトは staging を `/private/tmp/aseapp-surface-builder-cpack` に作成し、検証済み DMG だけを `code/native_ui/dist/` へコピーします。
+`Documents/GitHub` など macOS FileProvider 配下で直接 CPack staging を作ると、`com.apple.FinderInfo` などの拡張属性が `.app` に付いて `codesign` が失敗することがあります。そのため、スクリプトは staging を `/private/tmp/aseapp-surface-builder-cpack` に作成し、検証済み DMG だけを `standalone_exe/macos/` へコピーします。
 
 ### macOS 自己署名について
 
