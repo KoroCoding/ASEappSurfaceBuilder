@@ -87,6 +87,7 @@ if(APPLE)
     MACOSX_BUNDLE_BUNDLE_VERSION ${PROJECT_VERSION}
     MACOSX_BUNDLE_SHORT_VERSION_STRING ${PROJECT_VERSION}
     MACOSX_BUNDLE_ICON_FILE "aseapp_surface_builder_icon.icns"
+    INSTALL_RPATH "@executable_path/../Frameworks"
   )
 endif()
 
@@ -105,12 +106,143 @@ install(TARGETS aseapp_native_ui
 
 install(FILES README.txt QUICKSTART.txt CHANGELOG.txt DESTINATION .)
 
-qt_generate_deploy_app_script(
-  TARGET aseapp_native_ui
-  OUTPUT_SCRIPT deploy_script
-  NO_UNSUPPORTED_PLATFORM_ERROR
-)
+if(APPLE)
+  set(ASEAPP_MACOS_PUBLIC_CERT "${CMAKE_CURRENT_SOURCE_DIR}/certs/ASEappSurfaceBuilderLocalCodeSigning.cer")
+  if(EXISTS "${ASEAPP_MACOS_PUBLIC_CERT}")
+    install(FILES "${ASEAPP_MACOS_PUBLIC_CERT}" DESTINATION .)
+  endif()
+  install(PROGRAMS
+    tools/macos/ASEapp-macOS-Allow-This-App.command
+    DESTINATION .
+  )
+  install(FILES
+    tools/macos/README-macOS.txt
+    DESTINATION .
+  )
+endif()
+
+set(ASEAPP_DEPLOY_TOOL_OPTIONS)
+if(APPLE)
+  list(APPEND ASEAPP_DEPLOY_TOOL_OPTIONS -no-codesign)
+  if(DEFINED ENV{CONDA_PREFIX} AND EXISTS "$ENV{CONDA_PREFIX}/lib")
+    list(APPEND ASEAPP_DEPLOY_TOOL_OPTIONS "-libpath=$ENV{CONDA_PREFIX}/lib")
+  else()
+    foreach(ASEAPP_PREFIX IN LISTS CMAKE_PREFIX_PATH)
+      if(EXISTS "${ASEAPP_PREFIX}/lib")
+        list(APPEND ASEAPP_DEPLOY_TOOL_OPTIONS "-libpath=${ASEAPP_PREFIX}/lib")
+        break()
+      endif()
+    endforeach()
+  endif()
+endif()
+
+if(ASEAPP_DEPLOY_TOOL_OPTIONS)
+  qt_generate_deploy_app_script(
+    TARGET aseapp_native_ui
+    OUTPUT_SCRIPT deploy_script
+    NO_UNSUPPORTED_PLATFORM_ERROR
+    DEPLOY_TOOL_OPTIONS ${ASEAPP_DEPLOY_TOOL_OPTIONS}
+  )
+else()
+  qt_generate_deploy_app_script(
+    TARGET aseapp_native_ui
+    OUTPUT_SCRIPT deploy_script
+    NO_UNSUPPORTED_PLATFORM_ERROR
+  )
+endif()
 install(SCRIPT ${deploy_script})
+
+if(APPLE)
+  install(CODE [=[
+    set(ASEAPP_APP_BUNDLE "$ENV{DESTDIR}${CMAKE_INSTALL_PREFIX}/ASEappNativeUI.app")
+    if(EXISTS "${ASEAPP_APP_BUNDLE}")
+      find_program(ASEAPP_INSTALL_NAME_TOOL install_name_tool)
+      find_program(ASEAPP_XATTR xattr)
+      find_program(ASEAPP_CODESIGN codesign)
+
+      function(aseapp_add_rpath binary rpath)
+        if(EXISTS "${binary}" AND ASEAPP_INSTALL_NAME_TOOL)
+          execute_process(
+            COMMAND "${ASEAPP_INSTALL_NAME_TOOL}" -add_rpath "${rpath}" "${binary}"
+            RESULT_VARIABLE ASEAPP_RPATH_RESULT
+            ERROR_VARIABLE ASEAPP_RPATH_ERROR
+            OUTPUT_QUIET
+          )
+          if(ASEAPP_RPATH_RESULT AND NOT ASEAPP_RPATH_ERROR MATCHES "would duplicate")
+            message(WARNING "Failed to add rpath '${rpath}' to ${binary}: ${ASEAPP_RPATH_ERROR}")
+          endif()
+        endif()
+      endfunction()
+
+      if(ASEAPP_XATTR)
+        execute_process(COMMAND "${ASEAPP_XATTR}" -cr "${ASEAPP_APP_BUNDLE}" OUTPUT_QUIET ERROR_QUIET)
+        foreach(ASEAPP_ATTR IN ITEMS
+          com.apple.FinderInfo
+          com.apple.ResourceFork
+          com.apple.fileprovider.fpfs#P
+        )
+          execute_process(COMMAND "${ASEAPP_XATTR}" -d "${ASEAPP_ATTR}" "${ASEAPP_APP_BUNDLE}" OUTPUT_QUIET ERROR_QUIET)
+          execute_process(COMMAND "${ASEAPP_XATTR}" -rd "${ASEAPP_ATTR}" "${ASEAPP_APP_BUNDLE}" OUTPUT_QUIET ERROR_QUIET)
+        endforeach()
+      endif()
+
+      aseapp_add_rpath("${ASEAPP_APP_BUNDLE}/Contents/MacOS/ASEappNativeUI" "@executable_path/../Frameworks")
+
+      file(GLOB_RECURSE ASEAPP_FRAMEWORK_DYLIBS
+        "${ASEAPP_APP_BUNDLE}/Contents/Frameworks/*.dylib"
+      )
+      foreach(ASEAPP_DYLIB IN LISTS ASEAPP_FRAMEWORK_DYLIBS)
+        aseapp_add_rpath("${ASEAPP_DYLIB}" "@loader_path")
+      endforeach()
+
+      file(GLOB_RECURSE ASEAPP_PLUGIN_DYLIBS
+        "${ASEAPP_APP_BUNDLE}/Contents/PlugIns/*.dylib"
+      )
+      foreach(ASEAPP_PLUGIN IN LISTS ASEAPP_PLUGIN_DYLIBS)
+        aseapp_add_rpath("${ASEAPP_PLUGIN}" "@loader_path/../../Frameworks")
+      endforeach()
+
+      if(ASEAPP_XATTR)
+        execute_process(COMMAND "${ASEAPP_XATTR}" -cr "${ASEAPP_APP_BUNDLE}" OUTPUT_QUIET ERROR_QUIET)
+        foreach(ASEAPP_ATTR IN ITEMS
+          com.apple.FinderInfo
+          com.apple.ResourceFork
+          com.apple.fileprovider.fpfs#P
+        )
+          execute_process(COMMAND "${ASEAPP_XATTR}" -d "${ASEAPP_ATTR}" "${ASEAPP_APP_BUNDLE}" OUTPUT_QUIET ERROR_QUIET)
+          execute_process(COMMAND "${ASEAPP_XATTR}" -rd "${ASEAPP_ATTR}" "${ASEAPP_APP_BUNDLE}" OUTPUT_QUIET ERROR_QUIET)
+        endforeach()
+      endif()
+
+      if(ASEAPP_CODESIGN)
+        if("$ENV{ASEAPP_CODESIGN_IDENTITY}" STREQUAL "")
+          set(ASEAPP_CODESIGN_IDENTITY "-")
+        else()
+          set(ASEAPP_CODESIGN_IDENTITY "$ENV{ASEAPP_CODESIGN_IDENTITY}")
+        endif()
+
+        set(ASEAPP_CODESIGN_ARGS
+          --force
+          --deep
+          --sign "${ASEAPP_CODESIGN_IDENTITY}"
+        )
+        if(NOT ASEAPP_CODESIGN_IDENTITY STREQUAL "-" AND "$ENV{ASEAPP_ENABLE_HARDENED_RUNTIME}" STREQUAL "1")
+          list(APPEND ASEAPP_CODESIGN_ARGS --options runtime --timestamp)
+        endif()
+
+        execute_process(
+          COMMAND "${ASEAPP_CODESIGN}" ${ASEAPP_CODESIGN_ARGS} "${ASEAPP_APP_BUNDLE}"
+          RESULT_VARIABLE ASEAPP_CODESIGN_RESULT
+          ERROR_VARIABLE ASEAPP_CODESIGN_ERROR
+          OUTPUT_QUIET
+        )
+        if(ASEAPP_CODESIGN_RESULT)
+          message(WARNING "Ad-hoc codesign failed for ${ASEAPP_APP_BUNDLE}: ${ASEAPP_CODESIGN_ERROR}")
+        endif()
+      endif()
+    endif()
+  ]=])
+endif()
 
 if(WIN32)
   include(InstallRequiredSystemLibraries)

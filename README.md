@@ -11,9 +11,9 @@ ASEapp Surface Builder は、第一原理計算や表面モデル作成の前処
 | Windows | [ASEappSurfaceBuilder-1.0.0-Windows.exe](https://github.com/ic191226/ASEappSurfaceBuilder/releases/latest/download/ASEappSurfaceBuilder-1.0.0-Windows.exe) | 単体 `.exe` |
 | Windows ZIP | [ASEappSurfaceBuilder-1.0.0-Windows.zip](https://github.com/ic191226/ASEappSurfaceBuilder/releases/latest/download/ASEappSurfaceBuilder-1.0.0-Windows.zip) | フォルダ展開版 |
 | Linux | [ASEappSurfaceBuilder-1.0.0-Linux.tar.gz](https://github.com/ic191226/ASEappSurfaceBuilder/releases/latest/download/ASEappSurfaceBuilder-1.0.0-Linux.tar.gz) | `.tar.gz` |
-| macOS | [ASEappSurfaceBuilder-1.0.0-macOS.dmg](https://github.com/ic191226/ASEappSurfaceBuilder/releases/latest/download/ASEappSurfaceBuilder-1.0.0-macOS.dmg) | `.dmg`、後日ビルド予定 |
+| macOS | [ASEappSurfaceBuilder-1.0.0-macOS.dmg](https://github.com/ic191226/ASEappSurfaceBuilder/releases/latest/download/ASEappSurfaceBuilder-1.0.0-macOS.dmg) | `.dmg` |
 
-> macOS 版は後でビルドして Release assets に追加予定です。追加されるまでは上記リンクは利用できません。
+> macOS 版は `code/native_ui/package_macos.sh` でローカルビルドできます。GitHub Release から直接入手する場合は、Release assets に `.dmg` が追加済みか確認してください。
 
 ### Windows
 
@@ -62,6 +62,8 @@ open ASEappSurfaceBuilder-1.0.0-macOS.dmg
 ```
 
 DMG を開いたら、同梱されているアプリを `Applications` にドラッグしてください。
+
+Developer ID 署名を使わない自己署名版では、別の Mac で初回起動時に Gatekeeper の警告が出ることがあります。その場合は、右クリックから「開く」を選ぶか、DMG 内の `ASEapp-macOS-Allow-This-App.command` を実行して、同梱の自己署名証明書を信頼登録してください。
 
 ## フォルダ構成
 
@@ -170,5 +172,3 @@ GaNH,H,0.000000,0.000000,2.950000
 ## 開発・再ビルド
 
 ビルドと配布物作成は `PACKAGING.md` を参照してください。
-
-

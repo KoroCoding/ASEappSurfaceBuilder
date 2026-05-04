@@ -3,6 +3,7 @@ $tmp/
 code/native_ui/build/
 code/native_ui/install/
 code/native_ui/dist/
+code/native_ui/certs/
 
 # IDE / CMake local files
 *.user
