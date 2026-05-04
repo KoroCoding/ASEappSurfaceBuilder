@@ -1,0 +1,9 @@
+<RCC>
+    <qresource prefix="/icons">
+        <file alias="aseapp_surface_builder_icon.png">@ASEAPP_ICON_PNG@</file>
+    </qresource>
+    <qresource prefix="/data">
+        <file alias="elements.ini">@CMAKE_CURRENT_SOURCE_DIR@/assets/elements.ini</file>
+        <file alias="style.ini">@CMAKE_CURRENT_SOURCE_DIR@/assets/style.ini</file>
+    </qresource>
+</RCC>

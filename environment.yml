@@ -1,0 +1,11 @@
+name: aseapp-surface-builder
+channels:
+  - conda-forge
+dependencies:
+  - python=3.11
+  - cmake>=3.21
+  - ninja
+  - qt6-main
+  - pyside6
+  - pillow
+  - pefile

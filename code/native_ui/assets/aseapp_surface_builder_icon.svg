@@ -1,0 +1,55 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1024 1024">
+  <defs>
+    <filter id="drop" x="-30%" y="-30%" width="160%" height="160%">
+      <feDropShadow dx="0" dy="22" stdDeviation="22" flood-color="#06121F" flood-opacity="0.36"/>
+    </filter>
+    <linearGradient id="slab" x1="230" y1="600" x2="835" y2="720" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#8CF2FF" stop-opacity="0.92"/>
+      <stop offset="0.55" stop-color="#45C8F2" stop-opacity="0.86"/>
+      <stop offset="1" stop-color="#2F96FF" stop-opacity="0.66"/>
+    </linearGradient>
+    <linearGradient id="bond" x1="170" y1="210" x2="720" y2="650" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#6A7075"/>
+      <stop offset="1" stop-color="#343A40"/>
+    </linearGradient>
+    <radialGradient id="blue" cx="32%" cy="28%" r="70%">
+      <stop offset="0" stop-color="#DDF4FF"/>
+      <stop offset="0.22" stop-color="#4FB3FF"/>
+      <stop offset="1" stop-color="#1265D8"/>
+    </radialGradient>
+    <radialGradient id="orange" cx="32%" cy="28%" r="70%">
+      <stop offset="0" stop-color="#FFE8D7"/>
+      <stop offset="0.28" stop-color="#FF8756"/>
+      <stop offset="1" stop-color="#E0552D"/>
+    </radialGradient>
+    <radialGradient id="dark" cx="32%" cy="28%" r="70%">
+      <stop offset="0" stop-color="#B8C0CA"/>
+      <stop offset="0.30" stop-color="#626B74"/>
+      <stop offset="1" stop-color="#2F353B"/>
+    </radialGradient>
+  </defs>
+  <rect width="1024" height="1024" fill="none"/>
+  <g filter="url(#drop)">
+    <polygon points="210,656 536,545 846,655 506,790" fill="url(#slab)" stroke="#A9F7FF" stroke-width="24" stroke-linejoin="round"/>
+    <path d="M310 653 L507 724 L704 646 M414 614 L612 686" fill="none" stroke="#2F96FF" stroke-width="18" stroke-linecap="round" opacity="0.58"/>
+    <g fill="none" stroke="url(#bond)" stroke-width="42" stroke-linecap="round" stroke-linejoin="round">
+      <path d="M270 230 L482 230 L606 432 L482 635 L270 635 L146 432 Z"/>
+      <path d="M270 230 L374 432 L270 635" opacity="0.78"/>
+      <path d="M374 432 L606 432" opacity="0.78"/>
+    </g>
+    <g fill="none" stroke="#F6FBFF" stroke-width="10" stroke-linecap="round" stroke-linejoin="round" opacity="0.42">
+      <path d="M270 230 L482 230 L606 432 L482 635 L270 635 L146 432 Z"/>
+      <path d="M270 230 L374 432 L270 635" opacity="0.5"/>
+      <path d="M374 432 L606 432" opacity="0.5"/>
+    </g>
+    <circle cx="270" cy="230" r="88" fill="url(#blue)" stroke="#0D5BC8" stroke-width="11"/>
+    <circle cx="606" cy="432" r="88" fill="url(#blue)" stroke="#0D5BC8" stroke-width="11"/>
+    <circle cx="374" cy="432" r="104" fill="url(#orange)" stroke="#D84D28" stroke-width="11"/>
+    <circle cx="482" cy="230" r="62" fill="url(#dark)" stroke="#2C3339" stroke-width="10"/>
+    <circle cx="270" cy="635" r="62" fill="url(#dark)" stroke="#2C3339" stroke-width="10"/>
+    <circle cx="146" cy="432" r="62" fill="url(#dark)" stroke="#2C3339" stroke-width="10"/>
+    <circle cx="238" cy="196" r="22" fill="#FFFFFF" opacity="0.9"/>
+    <circle cx="338" cy="392" r="28" fill="#FFFFFF" opacity="0.72"/>
+    <circle cx="574" cy="398" r="22" fill="#FFFFFF" opacity="0.9"/>
+  </g>
+</svg>

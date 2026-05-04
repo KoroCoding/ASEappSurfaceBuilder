@@ -1,0 +1,11 @@
+﻿# Local generated files
+$tmp/
+code/native_ui/build/
+code/native_ui/install/
+code/native_ui/dist/
+
+# IDE / CMake local files
+*.user
+*.suo
+.vs/
+CMakeUserPresets.json
