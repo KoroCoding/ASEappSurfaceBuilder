@@ -1,4 +1,7 @@
 ﻿cmake_minimum_required(VERSION 3.21)
+if(POLICY CMP0091)
+  cmake_policy(SET CMP0091 NEW)
+endif()
 project(aseapp_native_ui VERSION 1.1.0 LANGUAGES CXX)
 
 set(CMAKE_CXX_STANDARD 17)
@@ -17,6 +20,12 @@ endif()
 
 find_package(Python3 REQUIRED COMPONENTS Interpreter)
 find_package(Qt6 REQUIRED COMPONENTS Widgets Gui Core)
+
+if(MSVC AND WIN32 AND DEFINED ENV{CONDA_PREFIX})
+  # Conda's Qt packages are release CRT builds. Keep Debug targets on /MD as
+  # well to avoid MSVCRTD/msvcrt mixing and Debug-only test crashes.
+  set(CMAKE_MSVC_RUNTIME_LIBRARY "MultiThreadedDLL")
+endif()
 
 set(ASEAPP_ICON_SOURCE "${CMAKE_CURRENT_SOURCE_DIR}/assets/aseapp_surface_builder_icon.svg")
 set(ASEAPP_GENERATED_ICON_DIR "${CMAKE_CURRENT_BINARY_DIR}/generated/icons")

@@ -1,5 +1,8 @@
 ﻿# ASEapp Surface Builder 操作ガイド
 
+> 対応版: v1.1.x 系 / current public repository UI。
+> このガイドは、配置プレビュー、VESTA `SBOND` 風ボンド距離設定、supercell / 真空層 / セル軸傾き、原子一覧 PNG、前駆体配置、吸着分子ポーズ編集まで含む新しい操作版です。まず全体像を掴みたい場合は、画像付きの `README.md` から読むと早いです。
+
 このガイドは、ASEapp Surface Builder で構造ファイルを読み込み、表面 slab / supercell / 真空層 / 吸着原子 / 前駆体配置 / 吸着分子ポーズ編集を行うための実用手順です。スクリーンショットは主に `guide_assets/sample_GaN.cif` を読み込んだ Windows 版の例です。吸着分子ポーズ編集の例では、実分子サンプル `code/native_ui/assets/samples/adsorbate_pose_methanol_on_cu.extxyz` も使っています。
 
 ## 0. まず覚える標準ワークフロー

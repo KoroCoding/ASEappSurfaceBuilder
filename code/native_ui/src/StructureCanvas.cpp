@@ -11,6 +11,7 @@
 #include <QWheelEvent>
 #include <QtMath>
 #include <algorithm>
+#include <array>
 #include <cmath>
 #include <iterator>
 #include <limits>
@@ -91,6 +92,74 @@ bool effectiveBondRange(
 
 QString gridKey(int x, int y, int z) {
     return QStringLiteral("%1|%2|%3").arg(x).arg(y).arg(z);
+}
+
+std::array<int, 3> spatialCellIndex(const QVector3D& point, double cellSize) {
+    return std::array<int, 3>{
+        static_cast<int>(std::floor(point.x() / cellSize)),
+        static_cast<int>(std::floor(point.y() / cellSize)),
+        static_cast<int>(std::floor(point.z() / cellSize))};
+}
+
+QString gridKey(const std::array<int, 3>& cell) {
+    return gridKey(cell[0], cell[1], cell[2]);
+}
+
+double typicalNearestNeighborDistance(const std::vector<NativeAtom>& atoms, double cellSize) {
+    if (atoms.size() < 2) {
+        return 0.0;
+    }
+
+    QHash<QString, std::vector<int>> grid;
+    grid.reserve(atoms.size());
+    std::vector<double> nearestDistanceByAtom(atoms.size(), std::numeric_limits<double>::infinity());
+    const auto recordNearestDistance = [&](int atomA, int atomB, double distance) {
+        if (distance <= 1.0e-6) {
+            return;
+        }
+        auto& nearestA = nearestDistanceByAtom[static_cast<std::size_t>(atomA)];
+        auto& nearestB = nearestDistanceByAtom[static_cast<std::size_t>(atomB)];
+        nearestA = std::min(nearestA, distance);
+        nearestB = std::min(nearestB, distance);
+    };
+
+    for (int i = 0; i < static_cast<int>(atoms.size()); ++i) {
+        const auto base = spatialCellIndex(atoms[static_cast<std::size_t>(i)].cartesian, cellSize);
+        for (int dx = -1; dx <= 1; ++dx) {
+            for (int dy = -1; dy <= 1; ++dy) {
+                for (int dz = -1; dz <= 1; ++dz) {
+                    const std::array<int, 3> neighbor{base[0] + dx, base[1] + dy, base[2] + dz};
+                    const auto it = grid.constFind(gridKey(neighbor));
+                    if (it == grid.cend()) {
+                        continue;
+                    }
+                    for (int j : it.value()) {
+                        const QVector3D diff = atoms[static_cast<std::size_t>(j)].cartesian
+                            - atoms[static_cast<std::size_t>(i)].cartesian;
+                        recordNearestDistance(i, j, diff.length());
+                    }
+                }
+            }
+        }
+        grid[gridKey(base)].push_back(i);
+    }
+
+    std::vector<double> finiteNearestDistances;
+    finiteNearestDistances.reserve(nearestDistanceByAtom.size());
+    for (double distance : nearestDistanceByAtom) {
+        if (std::isfinite(distance)) {
+            finiteNearestDistances.push_back(distance);
+        }
+    }
+    if (finiteNearestDistances.empty()) {
+        return 0.0;
+    }
+
+    std::sort(finiteNearestDistances.begin(), finiteNearestDistances.end());
+    // Use a robust typical nearest-neighbor distance, not the single closest
+    // pair. While inserting or dragging an atom between lattice sites, one
+    // temporary near-overlap should not shrink every atom in the scene.
+    return finiteNearestDistances[finiteNearestDistances.size() / 2];
 }
 }
 
@@ -390,43 +459,10 @@ void StructureCanvas::rebuildSceneCache() {
             m_cachedRadius,
             static_cast<double>((cellPoint(m_structure.cellVectors, mask) - m_cachedCenter).length()));
     }
-    const auto& atoms = m_structure.atoms;
-    const double cellSize = std::max(0.5, maximumBondCutoffWithCustomRanges(m_displayOptions.customBondRanges));
-    QHash<QString, std::vector<int>> grid;
-    grid.reserve(atoms.size());
-    const auto cellIndex = [&](const QVector3D& point) {
-        return std::array<int, 3>{
-            static_cast<int>(std::floor(point.x() / cellSize)),
-            static_cast<int>(std::floor(point.y() / cellSize)),
-            static_cast<int>(std::floor(point.z() / cellSize))};
-    };
-
-    double nearestDistance = std::numeric_limits<double>::infinity();
-    for (int i = 0; i < static_cast<int>(atoms.size()); ++i) {
-        const auto base = cellIndex(atoms[static_cast<std::size_t>(i)].cartesian);
-        for (int dx = -1; dx <= 1; ++dx) {
-            for (int dy = -1; dy <= 1; ++dy) {
-                for (int dz = -1; dz <= 1; ++dz) {
-                    const auto it = grid.constFind(gridKey(base[0] + dx, base[1] + dy, base[2] + dz));
-                    if (it == grid.cend()) {
-                        continue;
-                    }
-                    for (int j : it.value()) {
-                        const QVector3D diff = atoms[static_cast<std::size_t>(j)].cartesian
-                            - atoms[static_cast<std::size_t>(i)].cartesian;
-                        const double distance = diff.length();
-                        if (distance > 1.0e-6) {
-                            nearestDistance = std::min(nearestDistance, distance);
-                        }
-                    }
-                }
-            }
-        }
-        grid[gridKey(base[0], base[1], base[2])].push_back(i);
-    }
-    if (std::isfinite(nearestDistance)) {
-        m_cachedNearestAtomDistance = nearestDistance;
-    }
+    const double neighborCellSize = std::max(
+        0.5,
+        maximumBondCutoffWithCustomRanges(m_displayOptions.customBondRanges));
+    m_cachedNearestAtomDistance = typicalNearestNeighborDistance(m_structure.atoms, neighborCellSize);
     m_cachedBonds = buildBondPairs();
 }
 
@@ -442,19 +478,14 @@ std::vector<StructureCanvas::BondSegment> StructureCanvas::buildBondPairs() cons
     const double cellSize = std::max(0.5, maximumBondCutoffWithCustomRanges(m_displayOptions.customBondRanges));
     QHash<QString, std::vector<int>> grid;
     grid.reserve(atoms.size());
-    const auto cellIndex = [&](const QVector3D& point) {
-        return std::array<int, 3>{
-            static_cast<int>(std::floor(point.x() / cellSize)),
-            static_cast<int>(std::floor(point.y() / cellSize)),
-            static_cast<int>(std::floor(point.z() / cellSize))};
-    };
 
     for (int i = 0; i < static_cast<int>(atoms.size()); ++i) {
-        const auto base = cellIndex(atoms[static_cast<std::size_t>(i)].cartesian);
+        const auto base = spatialCellIndex(atoms[static_cast<std::size_t>(i)].cartesian, cellSize);
         for (int dx = -1; dx <= 1; ++dx) {
             for (int dy = -1; dy <= 1; ++dy) {
                 for (int dz = -1; dz <= 1; ++dz) {
-                    const auto it = grid.constFind(gridKey(base[0] + dx, base[1] + dy, base[2] + dz));
+                    const std::array<int, 3> neighbor{base[0] + dx, base[1] + dy, base[2] + dz};
+                    const auto it = grid.constFind(gridKey(neighbor));
                     if (it == grid.cend()) {
                         continue;
                     }
@@ -476,7 +507,7 @@ std::vector<StructureCanvas::BondSegment> StructureCanvas::buildBondPairs() cons
                 }
             }
         }
-        grid[gridKey(base[0], base[1], base[2])].push_back(i);
+        grid[gridKey(base)].push_back(i);
     }
     return bonds;
 }

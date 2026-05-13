@@ -1,88 +1,77 @@
 ﻿# ASEapp Surface Builder
 
-ASEapp Surface Builder は、第一原理計算や表面モデル作成の前処理を支援する Qt アプリです。VESTA に近い操作感で slab / supercell / adsorption / precursor 配置を確認しながら編集できます。
+**ASEapp Surface Builder** は、第一原理計算・表面反応モデル作成の前処理を支援する C++ / Qt デスクトップアプリです。VESTA に近い感覚で構造を見ながら、slab、supercell、真空層、吸着原子、前駆体、吸着分子ポーズを編集できます。
+
+<p align="center">
+  <img src="guide_assets/02_loaded_overview.png" alt="ASEapp Surface Builder main window with a loaded structure" width="820">
+</p>
+
+## すぐ使う
+
+| やりたいこと | 最短ルート |
+| --- | --- |
+| アプリを起動したい | [GitHub Releases](https://github.com/KoroCoding/ASEappSurfaceBuilder/releases/latest) から Windows 版を取得 |
+| 画面を見ながら使い方を知りたい | [操作ガイド `Guide.md`](Guide.md) を開く |
+| 自分でビルドしたい | [ソースからビルド](#ソースからビルド) を実行 |
+| 配布物を作り直したい | [`PACKAGING.md`](PACKAGING.md) を参照 |
+| 変更点を確認したい | [`release_notes/`](release_notes/) を参照 |
+
+## どんなアプリか
+
+- 構造ファイルを開き、球・ボンド・セル枠で確認できます。
+- 原子を選択して、直上・直下・原子間・多点中心・面法線上に新しい原子を置けます。
+- Supercell、真空層、セル軸傾き、slab 全体移動を GUI で調整できます。
+- 前駆体 CSV を保存/読み込みし、同じ相対配置を別の表面位置に再利用できます。
+- 吸着分子を剛体グループ化し、数値並進、pivot 回転、結合軸回転、結合長調整ができます。
+- extended XYZ / pose JSON / ASE snippet を出力し、ASE 側のバッチ処理へ戻せます。
+
+## 30秒でわかる操作イメージ
+
+| 1. 構造を開く | 2. 原子を選択して配置条件を決める |
+| --- | --- |
+| <img src="guide_assets/01_start_open.png" alt="Start screen" width="390"> | <img src="guide_assets/03_select_atom_and_placement_panel.png" alt="Placement panel" width="390"> |
+
+| 3. プレビューで位置を確認 | 4. 原子追加後に必要なら supercell / vacuum を調整 |
+| --- | --- |
+| <img src="guide_assets/05_placement_preview.png" alt="Placement preview" width="390"> | <img src="guide_assets/12_right_panel_lower_controls.png" alt="Supercell vacuum and view controls" width="390"> |
+
+| 吸着分子の向きを詰める | 論文・資料用の原子一覧を出す |
+| --- | --- |
+| <img src="guide_assets/13_adsorbate_pose_editor.png" alt="Adsorbate pose editor" width="390"> | <img src="guide_assets/10_atom_legend_export_dialog.png" alt="Atom legend export" width="390"> |
+
+より詳しい画面説明と手順は、スクリーンショット付きの [Guide.md](Guide.md) にまとめています。
 
 ## インストール
 
-配布バイナリは GitHub Releases から取得します。リポジトリ本体には、再生成可能な `.exe` / `.dmg` は含めません。
+配布バイナリは GitHub Releases で管理します。リポジトリ本体には、再生成可能な `.exe` / `.zip` / `.dmg` / build 出力は含めません。
 
-| OS | 直接ダウンロード | 推奨形式 |
+| OS | 推奨 | 備考 |
 | --- | --- | --- |
-| Windows | [ASEappSurfaceBuilder-1.1.0-Windows.exe](https://github.com/ic191226/ASEappSurfaceBuilder/releases/latest/download/ASEappSurfaceBuilder-1.1.0-Windows.exe) | 単体 `.exe` |
-| macOS | GitHub Releases の `.dmg` | `.dmg` |
+| Windows | [Releases](https://github.com/KoroCoding/ASEappSurfaceBuilder/releases/latest) の単体 `.exe` | ZIP 版はフォルダ構成を崩さず `bin\ASEappNativeUI.exe` を起動してください。 |
+| macOS | ソースからビルド、または `PACKAGING.md` の DMG 手順 | Release に DMG がない場合はローカルで作成してください。 |
+| Linux | ソースからビルド | Qt 6 と CMake が必要です。 |
 
-> Markdown の `.dmg` リンクはインストーラを直接実行するものではなく、DMG をダウンロードまたは開くためのリンクです。macOS では DMG を開いてから、同梱の案内に従ってアプリを配置・起動してください。
-
-旧版が必要な場合も、GitHub Releases の各バージョンから取得してください。
-
-### Windows
-
-PowerShell で直接ダウンロードして起動できます。
+### Windows: 単体 EXE を直接ダウンロード
 
 ```powershell
-$url = "https://github.com/ic191226/ASEappSurfaceBuilder/releases/latest/download/ASEappSurfaceBuilder-1.1.0-Windows.exe"
-$out = "$env:USERPROFILE\Downloads\ASEappSurfaceBuilder-1.1.0-Windows.exe"
-Invoke-WebRequest -Uri $url -OutFile $out
+$repo = "KoroCoding/ASEappSurfaceBuilder"
+$release = Invoke-RestMethod -Uri "https://api.github.com/repos/$repo/releases/latest"
+$asset = $release.assets | Where-Object { $_.name -match "Windows\.exe$" } | Select-Object -First 1
+if (-not $asset) { throw "Windows .exe asset was not found in the latest release." }
+$out = Join-Path $env:USERPROFILE "Downloads\$($asset.name)"
+Invoke-WebRequest -Uri $asset.browser_download_url -OutFile $out
 Start-Process $out
 ```
 
-ZIP 版を使う場合は、展開後の `bin` / `plugins` / `translations` を含むフォルダ構成を崩さず、`bin\ASEappNativeUI.exe` を起動してください。`bin\ASEappNativeUI.exe` だけを単独で移動すると Qt DLL 不足で起動できません。
+手動で取得する場合は、[Releases](https://github.com/KoroCoding/ASEappSurfaceBuilder/releases/latest) を開いて最新の Windows 版をダウンロードしてください。
 
-### Linux
+### macOS / Linux
 
-```bash
-curl -L -o ASEappSurfaceBuilder-1.0.0-Linux.tar.gz \
-  https://github.com/ic191226/ASEappSurfaceBuilder/releases/latest/download/ASEappSurfaceBuilder-1.0.0-Linux.tar.gz
+現在の公開 Release に目的の OS 用バイナリがない場合は、次の「ソースからビルド」を使ってください。macOS の `.dmg` 作成・署名・notarization の考え方は [`PACKAGING.md`](PACKAGING.md) に分けています。
 
-mkdir -p ~/.local/opt/aseapp-surface-builder ~/.local/bin
-tar -xzf ASEappSurfaceBuilder-1.0.0-Linux.tar.gz -C ~/.local/opt/aseapp-surface-builder
-cat > ~/.local/bin/aseapp-surface-builder <<'EOF'
-#!/usr/bin/env bash
-exec "$HOME/.local/opt/aseapp-surface-builder/bin/ASEappNativeUI" "$@"
-EOF
-chmod +x ~/.local/bin/aseapp-surface-builder
+## ソースからビルド
 
-aseapp-surface-builder
-```
-
-`~/.local/bin` に PATH が通っていない場合は、次を `~/.bashrc` や `~/.zshrc` に追加してください。
-
-```bash
-export PATH="$HOME/.local/bin:$PATH"
-```
-
-### macOS
-
-macOS 版の DMG は GitHub Releases からダウンロードして開けます。
-
-```bash
-curl -L -o ASEappSurfaceBuilder-1.0.0-macOS.dmg \
-  https://github.com/ic191226/ASEappSurfaceBuilder/releases/download/v1.0.0/ASEappSurfaceBuilder-1.0.0-macOS.dmg
-open ASEappSurfaceBuilder-1.0.0-macOS.dmg
-```
-
-DMG を開いたら、同梱されているアプリを `Applications` にドラッグしてください。
-
-Developer ID 署名を使わない自己署名版では、別の Mac で初回起動時に Gatekeeper の警告が出ることがあります。その場合は、右クリックから「開く」を選ぶか、DMG 内の `ASEapp-macOS-Allow-This-App.command` を実行して、同梱の自己署名証明書を信頼登録してください。
-
-## フォルダ構成
-
-GitHub 公開時に迷わないように、ソースコードと再生成可能な配布物を分けています。配布バイナリはリポジトリでは追跡せず、GitHub Releases に添付します。
-
-```text
-code/native_ui/                          # C++ / Qt ソースコード
-release_notes/                           # バージョン別リリースノート
-requirements.txt                         # Python補助ツール用ライブラリ
-environment.yml                          # Conda環境構築用
-PACKAGING.md                             # 配布物の再生成手順
-standalone_exe/                          # ローカル生成物置き場（git 追跡対象外）
-```
-
-ローカルで作った Windows `.exe` や macOS `.dmg` は `standalone_exe/` に置けますが、公開リポジトリでは追跡しません。ソースから使う場合は次の手順で環境を作ってください。
-
-## 単体EXEを使わない場合
-
-推奨は Conda です。Qt 6 / CMake / Python補助ツールをまとめて入れます。
+推奨は Conda 環境です。Qt 6 / CMake / Python 補助ツールをまとめて用意できます。
 
 ```bash
 conda env create -f environment.yml
@@ -90,7 +79,7 @@ conda activate aseapp-surface-builder
 pip install -r requirements.txt
 ```
 
-Windows でビルドして起動する例です。
+### Windows
 
 ```powershell
 $env:CONDA_PREFIX = (conda info --base) + "\envs\aseapp-surface-builder"
@@ -99,7 +88,7 @@ cmake --build code/native_ui/build --config Release --parallel 2
 .\code\native_ui\build\Release\ASEappNativeUI.exe
 ```
 
-Linux / macOS では次を基本にします。
+### macOS / Linux
 
 ```bash
 cmake -S code/native_ui -B code/native_ui/build -DCMAKE_PREFIX_PATH="$CONDA_PREFIX"
@@ -107,31 +96,62 @@ cmake --build code/native_ui/build --config Release --parallel 2
 ./code/native_ui/build/ASEappNativeUI
 ```
 
+## 対応ファイル形式
+
+| 分類 | 対応形式 | 用途 |
+| --- | --- | --- |
+| VASP | `POSCAR`, `CONTCAR`, `.vasp`, `.poscar` | 計算投入前後の構造確認・保存 |
+| XYZ | `.xyz`, `.extxyz` | ASE とのやり取り。cell / PBC を残したい場合は extended XYZ 推奨 |
+| 結晶構造 | `.cif`, `.pdb`, `.xsf` | 外部データの読み込み |
+| ASEapp | `.aseproj`, `.json` | ASEapp の編集情報を保持した再編集用形式 |
+| VESTA | `.vesta` | VESTA 由来構造の取り込み |
+
 ## 主な機能
-- POSCAR / CONTCAR / `.vasp` / `.xyz` / `.cif` / `.pdb` / `.xsf` / `.json` / `.aseproj` / `.vesta` の読み込み
-- VESTA 風の原子色・球表示・視点操作
-- VESTA `SBOND` 風の元素ペア別ボンド距離 min/max Å 設定
-- 左クリック選択、Ctrl 追加選択、Ctrl + 左ドラッグで重なった奥の原子も選択、Esc で解除
-- 選択原子の直上 / 直下 / 原子間 / 多点中心への原子配置
+
+### 表示・選択
+
+- VESTA 風の原子色、球表示、ボンド表示、セル枠表示
+- direct `a/b/c` と reciprocal `a*/b*/c*` 視点
+- 透視投影、奥行き表現、原子ラベル、軸表示の切替
+- 左クリック選択、Ctrl 追加選択、Ctrl + 左ドラッグで重なった奥の原子も選択
+- Shift + 左ドラッグで選択原子を画面平面内に移動
+
+### 原子配置
+
+- 選択原子の直上 / 直下への配置
 - 複数選択時の一括直上 / 直下配置
-- 周期表から生成元素を選択し、詳細情報はホバー時だけ表示
-- 前駆体 CSV 保存 / 読込 / 現在の配置位置への一括配置
-- Supercell 作成、真空層追加、真空層除去、セル軸傾き（真空層操作後も Supercell 倍率を保持）
+- 選択原子の中心、または選択面の法線上への配置
+- 周期表ダイアログから生成元素を選択
+- 配置プレビューは明示的にオンにした時だけ表示
+
+### 表面モデル編集
+
+- Supercell 作成
+- 真空層の追加・除去
 - slab 全体の a/b/c 方向移動
-- 論文・学会用の原子一覧 PNG 出力
-- POSCAR 形式で保存
+- セル軸傾きによる step-terrace 候補作成
+- VESTA `SBOND` 風の元素ペア別ボンド距離 min/max Å 設定
+
+### 前駆体・吸着分子ポーズ
+
+- 前駆体 CSV の保存 / 読込 / 再配置
+- 選択原子群を吸着分子 pose group として登録
+- XYZ / cell / slab 法線方向の数値並進
+- pivot 固定回転、選択中 2 原子の結合軸回転
+- 結合長調整
+- extended XYZ、pose JSON、ASE snippet 出力
 
 ## 基本操作
 
-1. 構造ファイルをドラッグ&ドロップ、または `Open` で読み込みます。
-2. 原子をクリックして選択します。
-3. 必要なら周期表から生成元素を選びます。
-4. 配置位置を選び、`Apply` で配置します。
-5. `Save` で POSCAR 形式として保存します。
+1. `開く` またはドラッグ&ドロップで構造ファイルを読み込みます。
+2. `c` / `c*` 視点で表面方向を確認します。
+3. 必要に応じて `スーパーセル`、`真空層`、`セル軸傾き` を調整します。
+4. 原子をクリックして基準原子を選択します。
+5. `生成元素` と `配置位置` を決め、必要な時だけ `配置プレビューを表示` をオンにします。
+6. `配置する` を押して原子を追加します。
+7. `保存` で `.aseproj`, POSCAR, extended XYZ などに保存します。
 
-詳しい手順は `code/native_ui/QUICKSTART.txt` または配布フォルダ内の `QUICKSTART.txt` を参照してください。
-
-## 重要なショートカット
+## ショートカット
 
 | 操作 | 内容 |
 | --- | --- |
@@ -142,16 +162,16 @@ cmake --build code/native_ui/build --config Release --parallel 2
 | Ctrl + 左クリック | 選択追加 / 解除 |
 | Ctrl + 左ドラッグ | 重なった奥の原子も追加選択 |
 | Shift + 左ドラッグ | 選択原子を画面平面内で移動 |
+| Delete | 選択原子を削除 |
 | Esc | 選択解除 |
 | F / ダブルクリック | フィット |
 | A / B / C | direct a/b/c 方向表示 |
 | Ctrl+Alt+A/B/C | reciprocal a*/b*/c* 方向表示 |
+| F1 | ヘルプ |
 
-通常の slab のように c 軸が ab 面法線と平行なセルでは、direct c と reciprocal c* は同じ向きに見えます。c 軸を傾けるなどして非直交になった場合は、c と c* が異なる視点になります。
+通常の slab のように c 軸が ab 面法線と平行なセルでは、direct `c` と reciprocal `c*` は同じ向きに見えます。非直交セルやセル軸傾き後は、`c` と `c*` が異なる確認視点になります。
 
-## 前駆体 CSV
-
-保存時に前駆体名を入力します。保存 CSV は前駆体名と相対座標だけです。
+## 前駆体 CSV 例
 
 ```csv
 name,element,dx_angstrom,dy_angstrom,dz_angstrom
@@ -160,16 +180,50 @@ GaNH,N,0.000000,0.000000,1.950000
 GaNH,H,0.000000,0.000000,2.950000
 ```
 
-`dx/dy/dz` は、前駆体内で最も低い原子（cartesian z 最小）を基準にした Å 単位の相対座標です。
-読み込んだ前駆体名は、生成元素とは別の「前駆体」ドロップダウンに表示されます。前駆体を選び、通常の原子配置と同じ「配置位置」を指定して「前駆体配置」を押すと、前駆体内で最も低い原子がその位置へ来るように配置できます。
+`dx/dy/dz` は、前駆体内で最も低い原子を基準にした Å 単位の相対座標です。前駆体を読み込むと、通常の原子配置と同じ配置位置にまとめて置けます。
+
+## リポジトリ構成
+
+```text
+code/native_ui/       C++ / Qt の本体ソース
+Guide.md              スクリーンショット付き操作ガイド
+guide_assets/         README / Guide 用スクリーンショットとサンプル構造
+release_notes/        バージョン別リリースノート
+PACKAGING.md          配布物の再生成手順
+environment.yml       Conda 環境定義
+requirements.txt      Python 補助ツール用依存関係
+standalone_exe/       ローカル生成物置き場（git 追跡対象外）
+```
+
+公開リポジトリには、ローカル生成された build 出力、証明書、単体 EXE、DMG、仕様書などを含めない方針です。必要な配布物は GitHub Releases に添付してください。
+
+## 開発時の確認
+
+```powershell
+cmake -S code/native_ui -B code/native_ui/build
+cmake --build code/native_ui/build --config Release --parallel 2
+ctest --test-dir code/native_ui/build -C Release --output-on-failure
+```
+
+Windows + Conda + MSVC では、Debug ビルドも Conda Qt と同じ CRT 側に揃える設定を入れています。Debug 検証を行う場合も次を推奨します。
+
+```powershell
+$env:CONDA_PREFIX = "C:\Users\<you>\anaconda3\envs\aseapp-surface-builder"
+$env:PATH = "$env:CONDA_PREFIX\Library\bin;$env:CONDA_PREFIX;$env:CONDA_PREFIX\Scripts;" + $env:PATH
+cmake --build code/native_ui/build --config Debug --parallel 2
+ctest --test-dir code/native_ui/build -C Debug --output-on-failure
+```
 
 ## トラブルシュート
 
-- `freetype.dll` などが見つからない場合: ZIP 展開フォルダ全体、または単体 launcher 版 `ASEappSurfaceBuilder-1.1.0-Windows.exe` を使ってください。
-- Windows の Application Control / Smart App Control により起動が止められる場合: これは DLL 不足ではなく Windows 側の実行制御です。GitHub Releases で他の人へ配布する正式版は、自己署名ではなく Microsoft Trusted Signing や OV/EV などの信頼済みコード署名で署名してください。自己署名は検証用で、Smart App Control 環境では許可されない場合があります。
-- 画面が重い場合: ボンド表示やプレビューを減らし、必要な時だけ Supercell を大きくしてください。
-- 周期表が見切れる場合: 現行版では説明文・凡例・ボタンを出さず、周期表だけを固定サイズ表示します。古い配布物を起動していないか確認してください。
+| 症状 | 対処 |
+| --- | --- |
+| `freetype.dll` などが見つからない | ZIP 版は展開フォルダ全体を保ったまま起動してください。単体 EXE 版なら DLL 同梱の launcher を使えます。 |
+| Windows Application Control / Smart App Control で止まる | DLL 不足ではなく Windows 側の実行制御です。広く配布する正式版は信頼済みコード署名を推奨します。 |
+| 画面が重い | ボンド表示、ラベル、プレビューを必要な時だけ有効にし、Supercell を大きくしすぎないでください。 |
+| 原子配置位置がわかりにくい | `配置プレビューを表示` をオンにして、半透明の予定位置を確認してから `配置する` を押してください。 |
+| macOS で初回起動警告が出る | 自己署名や未notarizeのビルドでは Gatekeeper 警告が出ます。右クリックの「開く」、署名、notarization を確認してください。 |
 
-## 開発・再ビルド
+## ライセンス・引用
 
-ビルドと配布物作成は `PACKAGING.md` を参照してください。
+ライセンスファイルを追加する場合は、この節に明記してください。論文・発表で利用する場合は、使用したバージョン、入力構造、出力形式、追加した前駆体/吸着分子条件を記録しておくことを推奨します。
