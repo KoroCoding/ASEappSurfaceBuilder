@@ -13,9 +13,10 @@ struct ElementStyle {
     QColor color = QColor("#C9D3E6");
     double radius = 1.0;
 };
+}  // namespace
 
-QString normalizeElement(QString text) {
-    text = text.trimmed();
+QString vestaNormalizeElement(const QString& element) {
+    QString text = element.trimmed();
     if (text.isEmpty()) {
         return QStringLiteral("X");
     }
@@ -23,12 +24,13 @@ QString normalizeElement(QString text) {
     return text.left(1).toUpper() + text.mid(1).toLower();
 }
 
-QString bondKey(const QString& elementA, const QString& elementB) {
-    const QString a = normalizeElement(elementA);
-    const QString b = normalizeElement(elementB);
+QString vestaBondKey(const QString& elementA, const QString& elementB) {
+    const QString a = vestaNormalizeElement(elementA);
+    const QString b = vestaNormalizeElement(elementB);
     return (a <= b) ? (a + QLatin1Char('|') + b) : (b + QLatin1Char('|') + a);
 }
 
+namespace {
 QHash<QString, ElementStyle> loadVestaStylesFromPath(const QString& path) {
     QHash<QString, ElementStyle> styles;
     QFile file(path);
@@ -60,7 +62,7 @@ QHash<QString, ElementStyle> loadVestaStylesFromPath(const QString& path) {
         }
 
         styles.insert(
-            normalizeElement(parts.at(1)),
+            vestaNormalizeElement(parts.at(1)),
             ElementStyle{
                 QColor::fromRgbF(
                     std::clamp(r, 0.0, 1.0),
@@ -74,11 +76,11 @@ QHash<QString, ElementStyle> loadVestaStylesFromPath(const QString& path) {
     return styles;
 }
 
-QHash<QString, double> loadVestaBondCutoffsFromPath(const QString& path) {
-    QHash<QString, double> cutoffs;
+QHash<QString, BondDistanceRange> loadVestaBondRangesFromPath(const QString& path) {
+    QHash<QString, BondDistanceRange> ranges;
     QFile file(path);
     if (!file.open(QIODevice::ReadOnly | QIODevice::Text)) {
-        return cutoffs;
+        return ranges;
     }
 
     QTextStream stream(&file);
@@ -115,13 +117,13 @@ QHash<QString, double> loadVestaBondCutoffsFromPath(const QString& path) {
             continue;
         }
 
-        cutoffs.insert(bondKey(parts.at(1), parts.at(2)), maxDistance);
+        ranges.insert(vestaBondKey(parts.at(1), parts.at(2)), BondDistanceRange{minDistance, maxDistance});
     }
 
-    return cutoffs;
+    return ranges;
 }
 
-QHash<QString, double> loadVestaBondCutoffs() {
+QHash<QString, BondDistanceRange> loadVestaBondRanges() {
     const QStringList candidates = {
         QDir::homePath() + QStringLiteral("/AppData/Roaming/VESTA/style/default.ini"),
         QDir::homePath() + QStringLiteral("/AppData/Roaming/VESTA/style.ini"),
@@ -132,9 +134,9 @@ QHash<QString, double> loadVestaBondCutoffs() {
     };
 
     for (const auto& candidate : candidates) {
-        auto cutoffs = loadVestaBondCutoffsFromPath(candidate);
-        if (!cutoffs.isEmpty()) {
-            return cutoffs;
+        auto ranges = loadVestaBondRangesFromPath(candidate);
+        if (!ranges.isEmpty()) {
+            return ranges;
         }
     }
     return {};
@@ -162,20 +164,20 @@ const QHash<QString, ElementStyle>& styleMap() {
     return styles;
 }
 
-const QHash<QString, double>& bondMap() {
-    static const QHash<QString, double> cutoffs = loadVestaBondCutoffs();
-    return cutoffs;
+const QHash<QString, BondDistanceRange>& bondMap() {
+    static const QHash<QString, BondDistanceRange> ranges = loadVestaBondRanges();
+    return ranges;
 }
 }  // namespace
 
 QColor vestaElementColor(const QString& element) {
-    const auto key = normalizeElement(element);
+    const auto key = vestaNormalizeElement(element);
     const auto it = styleMap().find(key);
     return it != styleMap().end() ? it->color : QColor("#C9D3E6");
 }
 
 double vestaElementRadius(const QString& element) {
-    const auto key = normalizeElement(element);
+    const auto key = vestaNormalizeElement(element);
     const auto it = styleMap().find(key);
     return it != styleMap().end() ? it->radius : 1.0;
 }
@@ -184,18 +186,30 @@ bool vestaBondCutoff(const QString& elementA, const QString& elementB, double* c
     if (cutoff == nullptr) {
         return false;
     }
-    const auto it = bondMap().find(bondKey(elementA, elementB));
+    const auto it = bondMap().find(vestaBondKey(elementA, elementB));
     if (it == bondMap().end()) {
         return false;
     }
-    *cutoff = it.value();
+    *cutoff = it->maxDistance;
+    return true;
+}
+
+bool vestaBondDistanceRange(const QString& elementA, const QString& elementB, BondDistanceRange* range) {
+    if (range == nullptr) {
+        return false;
+    }
+    const auto it = bondMap().find(vestaBondKey(elementA, elementB));
+    if (it == bondMap().end()) {
+        return false;
+    }
+    *range = it.value();
     return true;
 }
 
 double vestaMaximumBondCutoff() {
     double maxCutoff = 0.0;
     for (auto it = bondMap().cbegin(); it != bondMap().cend(); ++it) {
-        maxCutoff = std::max(maxCutoff, it.value());
+        maxCutoff = std::max(maxCutoff, it->maxDistance);
     }
     return maxCutoff > 0.0 ? maxCutoff : 4.5;
 }

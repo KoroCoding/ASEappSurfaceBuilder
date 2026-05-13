@@ -6,22 +6,21 @@
 
 ```text
 code/native_ui/                          # C++ / Qt ソースコード
-standalone_exe/windows/                  # Windows 単体配布EXE
-standalone_exe/windows/ASEappSurfaceBuilder-1.0.0-Windows.exe
-standalone_exe/macos/                    # macOS 配布DMG
-standalone_exe/macos/ASEappSurfaceBuilder-1.0.0-macOS.dmg
 requirements.txt                         # Python補助ツール用ライブラリ
 environment.yml                          # Conda環境構築用
+standalone_exe/                          # ローカル配布物出力先（git 追跡対象外）
 ```
 
 ## 最終配布物
 
 GitHub Releases には次の名前でアップロードします。
 
-- Windows 単体 launcher: `standalone_exe/windows/ASEappSurfaceBuilder-1.0.0-Windows.exe`
-- Windows ZIP: `code/native_ui/dist/ASEappSurfaceBuilder-1.0.0-Windows.zip`
-- Linux: `code/native_ui/dist/ASEappSurfaceBuilder-1.0.0-Linux.tar.gz`
-- macOS: `standalone_exe/macos/ASEappSurfaceBuilder-1.0.0-macOS.dmg`
+- Windows 単体 launcher: `ASEappSurfaceBuilder-1.1.0-Windows.exe`
+- Windows ZIP: `ASEappSurfaceBuilder-1.1.0-Windows.zip`
+- Linux: `ASEappSurfaceBuilder-1.1.0-Linux.tar.gz`
+- macOS: `ASEappSurfaceBuilder-1.1.0-macOS.dmg`（macOS 上で再ビルドした場合）
+
+配布物はローカルでは `standalone_exe/` や `code/native_ui/dist/` に生成しますが、公開リポジトリでは追跡せず、GitHub Releases に添付します。
 
 Windows では通常、単体 launcher 版だけを配布すれば十分です。
 
@@ -62,7 +61,7 @@ powershell -ExecutionPolicy Bypass -File code/native_ui/package_windows_launcher
 `package_windows_launcher.ps1` は、既定で次を作成します。
 
 ```text
-standalone_exe/windows/ASEappSurfaceBuilder-1.0.0-Windows.exe
+standalone_exe/windows/ASEappSurfaceBuilder-1.1.0-Windows.exe
 ```
 
 ### ローカル署名（開発確認用）
@@ -86,7 +85,7 @@ powershell -ExecutionPolicy Bypass -File code/native_ui/package_windows_launcher
 ## 展開版を確認する
 
 ```powershell
-$zip = (Resolve-Path 'code/native_ui/dist/ASEappSurfaceBuilder-1.0.0-Windows.zip').Path
+$zip = (Resolve-Path 'code/native_ui/dist/ASEappSurfaceBuilder-1.1.0-Windows.zip').Path
 $target = Join-Path $env:TEMP 'aseapp_surface_builder_verify'
 if (Test-Path $target) { Remove-Item -LiteralPath $target -Recurse -Force }
 Expand-Archive -LiteralPath $zip -DestinationPath $target -Force
@@ -122,7 +121,7 @@ macOS では次のスクリプトを使ってください。
 このスクリプトは、Release ビルド、Qt ランタイム同梱、自己署名、DMG 作成、署名検証、DMG 検証をまとめて実行し、次を作成します。
 
 ```text
-standalone_exe/macos/ASEappSurfaceBuilder-1.0.0-macOS.dmg
+standalone_exe/macos/ASEappSurfaceBuilder-1.1.0-macOS.dmg
 ```
 
 `Documents/GitHub` など macOS FileProvider 配下で直接 CPack staging を作ると、`com.apple.FinderInfo` などの拡張属性が `.app` に付いて `codesign` が失敗することがあります。そのため、スクリプトは staging を `/private/tmp/aseapp-surface-builder-cpack` に作成し、検証済み DMG だけを `standalone_exe/macos/` へコピーします。
@@ -168,9 +167,10 @@ xcrun notarytool store-credentials aseapp-notary \
 
 ## 削除してよい生成物
 
-次は再生成可能な一時/中間生成物です。
+次は再生成可能な一時/中間生成物、または GitHub Releases に添付する配布バイナリです。公開リポジトリでは追跡しません。
 
 - `$tmp/`
 - `code/native_ui/build/`
 - `code/native_ui/install/`
 - `code/native_ui/dist/`
+- `standalone_exe/`

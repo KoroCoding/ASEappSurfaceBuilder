@@ -1,5 +1,6 @@
 param(
-    [string]$ZipPath = (Join-Path $PSScriptRoot 'dist\ASEappSurfaceBuilder-1.0.0-Windows.zip'),
+    [string]$Version = '1.1.0',
+    [string]$ZipPath = '',
     [string]$OutputExe = '',
     [string]$SignCertThumbprint = $env:ASEAPP_CODESIGN_THUMBPRINT,
     [string]$SignCertSubject = 'CN=ASEapp Surface Builder Local Code Signing'
@@ -8,8 +9,11 @@ param(
 $ErrorActionPreference = 'Stop'
 
 $projectRoot = [System.IO.Path]::GetFullPath((Join-Path $PSScriptRoot '..\..'))
+if ([string]::IsNullOrWhiteSpace($ZipPath)) {
+    $ZipPath = Join-Path $PSScriptRoot "dist\ASEappSurfaceBuilder-$Version-Windows.zip"
+}
 if ([string]::IsNullOrWhiteSpace($OutputExe)) {
-    $OutputExe = Join-Path $projectRoot 'standalone_exe\windows\ASEappSurfaceBuilder-1.0.0-Windows.exe'
+    $OutputExe = Join-Path $projectRoot "standalone_exe\windows\ASEappSurfaceBuilder-$Version-Windows.exe"
 }
 
 function Get-X64File([string]$root, [string]$name) {
@@ -182,7 +186,7 @@ try {
     if ($LASTEXITCODE -ne 0) {
         throw 'Failed to create payload zip.'
     }
-    Copy-Item -LiteralPath $payloadZip -Destination (Join-Path $zipDir 'ASEappSurfaceBuilder-1.0.0-Windows.zip') -Force
+    Copy-Item -LiteralPath $payloadZip -Destination (Join-Path $zipDir "ASEappSurfaceBuilder-$Version-Windows.zip") -Force
 
     $expandedPayloadRoot = Join-Path $zipDir ([System.IO.Path]::GetFileNameWithoutExtension($zipPath))
     $expandedBinDir = Join-Path $expandedPayloadRoot 'bin'

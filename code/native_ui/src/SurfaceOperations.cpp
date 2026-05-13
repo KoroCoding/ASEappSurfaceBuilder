@@ -132,6 +132,9 @@ QString normalizedMode(QString mode) {
 
 int requiredSelectionCount(const QString& mode) {
     const auto normalized = normalizedMode(mode);
+    if (normalized == "selection_centroid") {
+        return 1;
+    }
     if (normalized == "pair_midpoint" || normalized == "pair_fraction") {
         return 2;
     }
@@ -160,55 +163,19 @@ QVector3D placementAnchor(
     if (mode == "single_above" || mode == "single_below") {
         return references.front()->cartesian;
     }
-    if (mode == "pair_midpoint") {
-        return (references[0]->cartesian + references[1]->cartesian) * 0.5f;
-    }
-    if (mode == "pair_fraction") {
-        const double fraction = std::clamp(rule.fraction, 0.0, 1.0);
-        return references[0]->cartesian * static_cast<float>(1.0 - fraction)
-            + references[1]->cartesian * static_cast<float>(fraction);
-    }
-    if (mode == "triple_centroid") {
-        return (references[0]->cartesian + references[1]->cartesian + references[2]->cartesian) / 3.0f;
-    }
-    if (mode == "triple_weighted") {
-        const double w0 = rule.weights[0];
-        const double w1 = rule.weights[1];
-        const double w2 = rule.weights[2];
-        const double sum = w0 + w1 + w2;
-        if (std::abs(sum) < 1.0e-12) {
-            if (errorMessage != nullptr) {
-                *errorMessage = QObject::tr("Preset weights must not all be zero.");
-            }
-            return {};
-        }
-        const float inv = static_cast<float>(1.0 / sum);
-        return references[0]->cartesian * static_cast<float>(w0) * inv
-            + references[1]->cartesian * static_cast<float>(w1) * inv
-            + references[2]->cartesian * static_cast<float>(w2) * inv;
-    }
-    if (mode == "multi_centroid" || mode == "multi_plane_normal") {
+    if (mode == "selection_centroid"
+        || mode == "pair_midpoint"
+        || mode == "pair_fraction"
+        || mode == "triple_centroid"
+        || mode == "triple_weighted"
+        || mode == "multi_centroid"
+        || mode == "multi_weighted"
+        || mode == "multi_plane_normal") {
         QVector3D sum;
         for (const auto* atom : references) {
             sum += atom->cartesian;
         }
         return sum / static_cast<float>(references.size());
-    }
-    if (mode == "multi_weighted") {
-        QVector3D sum;
-        double weightSum = 0.0;
-        for (std::size_t i = 0; i < references.size(); ++i) {
-            const double weight = i < rule.weights.size() ? rule.weights[i] : 1.0;
-            sum += references[i]->cartesian * static_cast<float>(weight);
-            weightSum += weight;
-        }
-        if (std::abs(weightSum) < 1.0e-12) {
-            if (errorMessage != nullptr) {
-                *errorMessage = QObject::tr("Preset weights must not all be zero.");
-            }
-            return {};
-        }
-        return sum / static_cast<float>(weightSum);
     }
     if (errorMessage != nullptr) {
         *errorMessage = QObject::tr("Unknown placement mode: %1").arg(rule.mode);
@@ -581,7 +548,14 @@ StructureData addPlacementAtom(
     }
 
     std::vector<const NativeAtom*> references;
-    const bool usesAllSelected = mode == "multi_centroid" || mode == "multi_weighted" || mode == "multi_plane_normal";
+    const bool usesAllSelected = mode == "selection_centroid"
+        || mode == "pair_midpoint"
+        || mode == "pair_fraction"
+        || mode == "triple_centroid"
+        || mode == "triple_weighted"
+        || mode == "multi_centroid"
+        || mode == "multi_weighted"
+        || mode == "multi_plane_normal";
     const bool needsTiltReference = std::abs(rule.tiltDegrees) > 1.0e-8 && static_cast<int>(selectedAtomIds.size()) > required;
     const int referenceCount = usesAllSelected
         ? static_cast<int>(selectedAtomIds.size())

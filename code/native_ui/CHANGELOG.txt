@@ -1,6 +1,16 @@
 ﻿ASEapp Surface Builder CHANGELOG
 ================================
 
+Version 1.1.0 - Adsorbate pose editing release
+----------------------------------------------
+- 吸着分子ポーズ編集を追加し、選択原子群を剛体グループとして並進・回転できるように変更。
+- pivot 原子固定回転、選択中 2 原子の結合軸回転、選択結合長調整を追加。
+- 並進 / 回転 / 結合長調整のポーズプレビューを追加。
+- 2 原子間 / 3 原子間などの配置候補を、選択原子すべての中心へ統一。
+- VESTA SBOND 風の元素ペア別ボンド距離 min/max Å 設定を追加。
+- extended XYZ / adsorbate-only XYZ / pose JSON / ASE snippet 出力を追加。
+- Undo / Redo が構造、選択、吸着分子グループ情報を同期して復元するように修正。
+- メタノール on Cu 実分子サンプルの GUI 自己テストと ASE round-trip テストを追加。
 Version 1.0.0 - Final local release
 -----------------------------------
 - Windows 向け Qt ネイティブ UI を配布可能な ZIP / 単体 launcher として整備。

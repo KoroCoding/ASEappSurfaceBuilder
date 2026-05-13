@@ -6,7 +6,7 @@
 起動方法
 --------
 - 単体 launcher 版を使う場合:
-  ASEappSurfaceBuilder-1.0.0-Windows.exe を実行します。
+  ASEappSurfaceBuilder-1.1.0-Windows.exe を実行します。
 
 - ZIP 展開版を使う場合:
   bin\ASEappNativeUI.exe を実行します。
@@ -48,6 +48,8 @@ Ctrl+Alt+A/B/C: reciprocal a*,b*,c* 方向へ切り替え
 補足
 ----
 - 配置プレビューは既定で非表示です。必要な時だけ「配置プレビューを表示」をオンにしてください。
+- 吸着分子ポーズ編集のプレビューも既定で非表示です。「ポーズプレビューを表示」をオンにし、並進 / 回転 / 結合長の対象を選ぶと、Apply 前に半透明で確認できます。
+- ツールバーの「ボンド距離設定」では、VESTA の SBOND 風に元素ペアごとの表示ボンド距離 min/max Å を調整できます。2 原子を選択して開くと、その実測距離を最大値候補にできます。
 - 前駆体配置は、通常の原子配置と同じ「配置位置」「高さ/距離」「傾き角度」「比率」を使い、前駆体内で最も低い原子を配置先の原点に合わせます。
 - 通常 slab では direct c と reciprocal c* が同じ向きに見えます。c 軸が ab 面法線から傾く非直交セルでは異なる視点になります。
 - 前駆体CSV形式: name,element,dx_angstrom,dy_angstrom,dz_angstrom

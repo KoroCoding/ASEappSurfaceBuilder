@@ -1,5 +1,5 @@
 ﻿cmake_minimum_required(VERSION 3.21)
-project(aseapp_native_ui VERSION 1.0.0 LANGUAGES CXX)
+project(aseapp_native_ui VERSION 1.1.0 LANGUAGES CXX)
 
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -43,8 +43,7 @@ configure_file(
   @ONLY
 )
 
-add_executable(aseapp_native_ui
-  src/main.cpp
+set(ASEAPP_NATIVE_UI_COMMON_SOURCES
   src/MainWindow.cpp
   src/MainWindow.h
   src/SurfaceCustomizationRegistry.cpp
@@ -59,6 +58,11 @@ add_executable(aseapp_native_ui
   src/StructureFileLoader.h
   src/StructureData.h
   ${CMAKE_CURRENT_BINARY_DIR}/app_icons.qrc
+)
+
+add_executable(aseapp_native_ui
+  src/main.cpp
+  ${ASEAPP_NATIVE_UI_COMMON_SOURCES}
 )
 
 target_include_directories(aseapp_native_ui PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/src)
@@ -103,6 +107,63 @@ install(TARGETS aseapp_native_ui
   BUNDLE DESTINATION .
   RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR}
 )
+
+include(CTest)
+if(BUILD_TESTING)
+  set(ASEAPP_TEST_ENV)
+  set(ASEAPP_GUI_QT_TEST_ENV)
+  if(WIN32 AND DEFINED ENV{CONDA_PREFIX})
+    file(TO_NATIVE_PATH "$ENV{CONDA_PREFIX}/Library/bin" ASEAPP_TEST_CONDA_LIBRARY_BIN)
+    file(TO_NATIVE_PATH "$ENV{CONDA_PREFIX}" ASEAPP_TEST_CONDA_PREFIX)
+    file(TO_NATIVE_PATH "$ENV{CONDA_PREFIX}/Scripts" ASEAPP_TEST_CONDA_SCRIPTS)
+    file(TO_NATIVE_PATH "$ENV{CONDA_PREFIX}/Library/lib/qt6/plugins" ASEAPP_TEST_QT_PLUGIN_PATH)
+    set(ASEAPP_TEST_PATH "${ASEAPP_TEST_CONDA_LIBRARY_BIN};${ASEAPP_TEST_CONDA_PREFIX};${ASEAPP_TEST_CONDA_SCRIPTS};$ENV{PATH}")
+    string(REPLACE ";" "\\;" ASEAPP_TEST_PATH "${ASEAPP_TEST_PATH}")
+    set(ASEAPP_TEST_ENV "PATH=${ASEAPP_TEST_PATH}")
+    set(ASEAPP_GUI_QT_TEST_ENV
+      "QT_PLUGIN_PATH=${ASEAPP_TEST_QT_PLUGIN_PATH}"
+      "QT_QPA_PLATFORM=offscreen"
+    )
+  endif()
+
+  add_executable(aseapp_adsorbate_pose_self_test
+    src/AdsorbatePoseSelfTestMain.cpp
+    ${ASEAPP_NATIVE_UI_COMMON_SOURCES}
+  )
+  target_include_directories(aseapp_adsorbate_pose_self_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/src)
+  target_link_libraries(aseapp_adsorbate_pose_self_test PRIVATE Qt6::Widgets Qt6::Gui Qt6::Core)
+  set_target_properties(aseapp_adsorbate_pose_self_test PROPERTIES
+    OUTPUT_NAME "ASEappAdsorbatePoseSelfTest"
+  )
+
+  add_test(
+    NAME adsorbate_pose_gui_self_test
+    COMMAND $<TARGET_FILE:aseapp_adsorbate_pose_self_test>
+      --test-output "${CMAKE_CURRENT_BINARY_DIR}/adsorbate_pose_self_test"
+  )
+  set(ASEAPP_GUI_SELF_TEST_ENV)
+  if(ASEAPP_TEST_ENV)
+    list(APPEND ASEAPP_GUI_SELF_TEST_ENV "${ASEAPP_TEST_ENV}")
+  endif()
+  if(ASEAPP_GUI_QT_TEST_ENV)
+    list(APPEND ASEAPP_GUI_SELF_TEST_ENV ${ASEAPP_GUI_QT_TEST_ENV})
+  endif()
+  set_tests_properties(adsorbate_pose_gui_self_test PROPERTIES TIMEOUT 30)
+  if(ASEAPP_GUI_SELF_TEST_ENV)
+    set_tests_properties(adsorbate_pose_gui_self_test PROPERTIES ENVIRONMENT "${ASEAPP_GUI_SELF_TEST_ENV}")
+  endif()
+
+  add_test(
+    NAME ase_extxyz_roundtrip
+    COMMAND ${Python3_EXECUTABLE}
+      "${CMAKE_CURRENT_SOURCE_DIR}/tools/test_adsorbate_pose_roundtrip.py"
+      --work-dir "${CMAKE_CURRENT_BINARY_DIR}/adsorbate_pose_ase_roundtrip"
+  )
+  set_tests_properties(ase_extxyz_roundtrip PROPERTIES TIMEOUT 30)
+  if(ASEAPP_TEST_ENV)
+    set_tests_properties(ase_extxyz_roundtrip PROPERTIES ENVIRONMENT "${ASEAPP_TEST_ENV}")
+  endif()
+endif()
 
 install(FILES README.txt QUICKSTART.txt CHANGELOG.txt DESTINATION .)
 

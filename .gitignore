@@ -1,4 +1,4 @@
-﻿# Local generated files
+# Local generated files
 $tmp/
 code/native_ui/build/
 code/native_ui/install/
@@ -10,3 +10,13 @@ code/native_ui/certs/
 *.suo
 .vs/
 CMakeUserPresets.json
+
+# Public-release local/private artifacts
+/仕様書.md
+/standalone_exe/
+*.pfx
+*.p12
+*.key
+*.pem
+*.cer
+*.crt

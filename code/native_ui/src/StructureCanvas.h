@@ -1,9 +1,11 @@
 #pragma once
 
 #include <QRect>
+#include <QHash>
 #include <QWidget>
 #include <vector>
 
+#include "ElementStyle.h"
 #include "StructureData.h"
 
 class StructureCanvas : public QWidget {
@@ -23,6 +25,7 @@ public:
         bool perspective = false;
         bool depthCue = false;
         double atomScale = 1.0;
+        QHash<QString, BondDistanceRange> customBondRanges;
     };
 
     explicit StructureCanvas(QWidget* parent = nullptr);
@@ -42,9 +45,11 @@ public:
     void setJapanese(bool japanese);
     void setInteractionMode(InteractionMode mode);
     InteractionMode interactionMode() const;
+    QVector3D viewForward() const;
     QSize minimumSizeHint() const override;
     void setDisplayOptions(const DisplayOptions& options);
     DisplayOptions displayOptions() const;
+    int bondCount() const;
 
 signals:
     void atomActivated(int atomId);

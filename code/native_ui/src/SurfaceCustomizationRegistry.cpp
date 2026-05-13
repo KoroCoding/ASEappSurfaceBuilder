@@ -18,23 +18,26 @@ QString modeSummary(const QString& mode) {
     if (normalized == "single_below") {
         return QStringLiteral("1 atom / below");
     }
+    if (normalized == "selection_centroid") {
+        return QStringLiteral("Selected atoms / center");
+    }
     if (normalized == "pair_midpoint") {
-        return QStringLiteral("2 atoms / midpoint");
+        return QStringLiteral("Selected atoms / center (legacy pair)");
     }
     if (normalized == "pair_fraction") {
-        return QStringLiteral("2 atoms / line fraction");
+        return QStringLiteral("Selected atoms / center (legacy pair)");
     }
     if (normalized == "triple_centroid") {
-        return QStringLiteral("3 atoms / centroid");
+        return QStringLiteral("Selected atoms / center (legacy 3 atoms)");
     }
     if (normalized == "triple_weighted") {
-        return QStringLiteral("3 atoms / weighted centroid");
+        return QStringLiteral("Selected atoms / center (legacy 3 atoms)");
     }
     if (normalized == "multi_centroid") {
         return QStringLiteral("N atoms / centroid");
     }
     if (normalized == "multi_weighted") {
-        return QStringLiteral("N atoms / weighted centroid");
+        return QStringLiteral("N atoms / centroid (legacy weighted)");
     }
     if (normalized == "multi_plane_normal") {
         return QStringLiteral("N atoms / plane normal");
@@ -195,7 +198,9 @@ SurfacePlacementRule SurfaceCustomizationRegistry::ruleFromJson(const QJsonObjec
     }
     if (rule.selectionCount <= 0) {
         const QString normalized = rule.mode.trimmed().toLower();
-        if (normalized == "pair_midpoint" || normalized == "pair_fraction") {
+        if (normalized == "selection_centroid") {
+            rule.selectionCount = 1;
+        } else if (normalized == "pair_midpoint" || normalized == "pair_fraction") {
             rule.selectionCount = 2;
         } else if (normalized == "triple_centroid" || normalized == "triple_weighted" || normalized == "multi_plane_normal") {
             rule.selectionCount = 3;

@@ -201,6 +201,60 @@ QStringList tokenizeRespectingQuotes(const QString& line) {
     return tokens;
 }
 
+struct ExtXyzPropertyLayout {
+    int speciesColumn = 0;
+    int positionColumn = 1;
+    int atomIdColumn = -1;
+    int tagColumn = -1;
+    int columnCount = 4;
+    bool hasExplicitLayout = false;
+};
+
+ExtXyzPropertyLayout parseExtXyzPropertyLayout(const QString& comment) {
+    ExtXyzPropertyLayout layout;
+    const QRegularExpression propertiesRx(QStringLiteral("Properties=(?:\\\"([^\\\"]+)\\\"|([^ \\t\\r\\n]+))"));
+    const auto match = propertiesRx.match(comment);
+    if (!match.hasMatch()) {
+        return layout;
+    }
+
+    const QString definition = !match.captured(1).isEmpty() ? match.captured(1) : match.captured(2);
+    const QStringList parts = definition.split(QLatin1Char(':'), Qt::SkipEmptyParts);
+    if (parts.size() < 3 || parts.size() % 3 != 0) {
+        return layout;
+    }
+
+    int column = 0;
+    bool hasSpecies = false;
+    bool hasPosition = false;
+    for (int i = 0; i + 2 < parts.size(); i += 3) {
+        const QString name = parts.at(i).trimmed();
+        bool countOk = false;
+        const int count = parts.at(i + 2).trimmed().toInt(&countOk);
+        if (!countOk || count <= 0) {
+            return layout;
+        }
+        if (name == QStringLiteral("species") || name == QStringLiteral("symbol") || name == QStringLiteral("element")) {
+            layout.speciesColumn = column;
+            hasSpecies = true;
+        } else if (name == QStringLiteral("pos") || name == QStringLiteral("position") || name == QStringLiteral("positions")) {
+            layout.positionColumn = column;
+            hasPosition = count >= 3;
+        } else if (name == QStringLiteral("atom_id") || name == QStringLiteral("id")) {
+            layout.atomIdColumn = column;
+        } else if (name == QStringLiteral("tag") || name == QStringLiteral("label")) {
+            layout.tagColumn = column;
+        }
+        column += count;
+    }
+
+    if (hasSpecies && hasPosition && column >= 4) {
+        layout.columnCount = column;
+        layout.hasExplicitLayout = true;
+    }
+    return layout;
+}
+
 std::optional<StructureData> loadAseprojLike(const QString& path, QString* errorMessage) {
     const QString text = readUtf8NoBom(path, errorMessage);
     if (text.isEmpty()) {
@@ -279,6 +333,12 @@ std::optional<StructureData> loadXyz(const QString& path, QString* errorMessage)
     data.title = QFileInfo(path).baseName();
 
     const QString comment = lines.at(1);
+    const auto propertyLayout = parseExtXyzPropertyLayout(comment);
+    const QRegularExpression titleRx(QStringLiteral("Title=\"([^\"]+)\""));
+    const auto titleMatch = titleRx.match(comment);
+    if (titleMatch.hasMatch() && !titleMatch.captured(1).trimmed().isEmpty()) {
+        data.title = titleMatch.captured(1).trimmed();
+    }
     const QRegularExpression latticeRx(QStringLiteral("Lattice=\"([^\"]+)\""));
     const auto latticeMatch = latticeRx.match(comment);
     if (latticeMatch.hasMatch()) {
@@ -295,17 +355,31 @@ std::optional<StructureData> loadXyz(const QString& path, QString* errorMessage)
     data.atoms.reserve(static_cast<std::size_t>(atomCount));
     for (int i = 0; i < atomCount && i + 2 < lines.size(); ++i) {
         const auto tokens = tokenizeRespectingQuotes(lines.at(i + 2).trimmed());
-        if (tokens.size() < 4) {
+        const int requiredColumns = propertyLayout.hasExplicitLayout ? propertyLayout.columnCount : 4;
+        if (tokens.size() < requiredColumns) {
             continue;
         }
         NativeAtom atom;
         atom.atomId = i + 1;
-        atom.element = tokens.at(0);
-        atom.tag = QString("%1-%2").arg(normalizeElement(atom.element)).arg(atom.atomId, 4, 10, QChar('0'));
+        atom.element = tokens.at(propertyLayout.speciesColumn);
+        if (propertyLayout.atomIdColumn >= 0 && propertyLayout.atomIdColumn < tokens.size()) {
+            bool idOk = false;
+            const int parsedId = tokens.at(propertyLayout.atomIdColumn).toInt(&idOk);
+            if (idOk && parsedId > 0) {
+                atom.atomId = parsedId;
+            }
+        }
+        if (propertyLayout.tagColumn >= 0 && propertyLayout.tagColumn < tokens.size()) {
+            atom.tag = tokens.at(propertyLayout.tagColumn);
+        }
+        if (atom.tag.trimmed().isEmpty()) {
+            atom.tag = QString("%1-%2").arg(normalizeElement(atom.element)).arg(atom.atomId, 4, 10, QChar('0'));
+        }
+        const int pos = propertyLayout.positionColumn;
         atom.cartesian = QVector3D(
-            static_cast<float>(parseNumber(tokens.at(1))),
-            static_cast<float>(parseNumber(tokens.at(2))),
-            static_cast<float>(parseNumber(tokens.at(3))));
+            static_cast<float>(parseNumber(tokens.at(pos))),
+            static_cast<float>(parseNumber(tokens.at(pos + 1))),
+            static_cast<float>(parseNumber(tokens.at(pos + 2))));
         data.atoms.push_back(atom);
     }
     finalizeAtoms(data);
@@ -705,7 +779,7 @@ std::optional<StructureData> StructureFileLoader::load(const QString& path, QStr
     if (suffix == "aseproj" || suffix == "json" || suffix == "vesta") {
         return loadAseprojLike(path, errorMessage);
     }
-    if (suffix == "xyz") {
+    if (suffix == "xyz" || suffix == "extxyz") {
         return loadXyz(path, errorMessage);
     }
     if (suffix == "cif") {

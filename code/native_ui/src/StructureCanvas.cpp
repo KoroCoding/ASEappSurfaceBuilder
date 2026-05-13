@@ -58,6 +58,37 @@ double hitAtomRadius(const NativeAtom& atom, double scale, double perspective, d
     return std::max(8.0, screenAtomRadius(atom, scale, perspective, atomScale, densityScale) + 2.0);
 }
 
+bool distanceInRange(double distance, const BondDistanceRange& range) {
+    return distance >= range.minDistance - 1.0e-9 && distance <= range.maxDistance + 1.0e-9;
+}
+
+double maximumBondCutoffWithCustomRanges(const QHash<QString, BondDistanceRange>& customRanges) {
+    double maxCutoff = vestaMaximumBondCutoff();
+    for (auto it = customRanges.cbegin(); it != customRanges.cend(); ++it) {
+        if (it->maxDistance > 0.0 && it->maxDistance >= it->minDistance) {
+            maxCutoff = std::max(maxCutoff, it->maxDistance);
+        }
+    }
+    return maxCutoff > 0.0 ? maxCutoff : 4.5;
+}
+
+bool effectiveBondRange(
+    const QHash<QString, BondDistanceRange>& customRanges,
+    const QString& elementA,
+    const QString& elementB,
+    BondDistanceRange* range)
+{
+    if (range == nullptr) {
+        return false;
+    }
+    const auto custom = customRanges.constFind(vestaBondKey(elementA, elementB));
+    if (custom != customRanges.cend()) {
+        *range = custom.value();
+        return range->maxDistance > 0.0 && range->maxDistance >= range->minDistance;
+    }
+    return vestaBondDistanceRange(elementA, elementB, range);
+}
+
 QString gridKey(int x, int y, int z) {
     return QStringLiteral("%1|%2|%3").arg(x).arg(y).arg(z);
 }
@@ -70,7 +101,8 @@ StructureCanvas::StructureCanvas(QWidget* parent) : QWidget(parent) {
 }
 
 void StructureCanvas::setDisplayOptions(const DisplayOptions& options) {
-    const bool rebuildBonds = m_displayOptions.showBonds != options.showBonds;
+    const bool rebuildBonds = m_displayOptions.showBonds != options.showBonds
+        || m_displayOptions.customBondRanges != options.customBondRanges;
     m_displayOptions = options;
     if (rebuildBonds) {
         rebuildSceneCache();
@@ -80,6 +112,10 @@ void StructureCanvas::setDisplayOptions(const DisplayOptions& options) {
 
 StructureCanvas::DisplayOptions StructureCanvas::displayOptions() const {
     return m_displayOptions;
+}
+
+int StructureCanvas::bondCount() const {
+    return static_cast<int>(m_cachedBonds.size());
 }
 
 void StructureCanvas::setStructure(const StructureData& structure) {
@@ -131,6 +167,10 @@ void StructureCanvas::setInteractionMode(InteractionMode mode) {
 
 StructureCanvas::InteractionMode StructureCanvas::interactionMode() const {
     return m_interactionMode;
+}
+
+QVector3D StructureCanvas::viewForward() const {
+    return m_viewForward;
 }
 
 void StructureCanvas::updateInteractionCursor() {
@@ -351,7 +391,7 @@ void StructureCanvas::rebuildSceneCache() {
             static_cast<double>((cellPoint(m_structure.cellVectors, mask) - m_cachedCenter).length()));
     }
     const auto& atoms = m_structure.atoms;
-    const double cellSize = std::max(0.5, vestaMaximumBondCutoff());
+    const double cellSize = std::max(0.5, maximumBondCutoffWithCustomRanges(m_displayOptions.customBondRanges));
     QHash<QString, std::vector<int>> grid;
     grid.reserve(atoms.size());
     const auto cellIndex = [&](const QVector3D& point) {
@@ -399,7 +439,7 @@ std::vector<StructureCanvas::BondSegment> StructureCanvas::buildBondPairs() cons
         return bonds;
     }
     const auto& atoms = m_structure.atoms;
-    const double cellSize = std::max(0.5, vestaMaximumBondCutoff());
+    const double cellSize = std::max(0.5, maximumBondCutoffWithCustomRanges(m_displayOptions.customBondRanges));
     QHash<QString, std::vector<int>> grid;
     grid.reserve(atoms.size());
     const auto cellIndex = [&](const QVector3D& point) {
@@ -419,15 +459,19 @@ std::vector<StructureCanvas::BondSegment> StructureCanvas::buildBondPairs() cons
                         continue;
                     }
                     for (int j : it.value()) {
-            double cutoff = 0.0;
-            if (!vestaBondCutoff(atoms[static_cast<std::size_t>(i)].element, atoms[static_cast<std::size_t>(j)].element, &cutoff)) {
-                continue;
-            }
-            const QVector3D diff = atoms[static_cast<std::size_t>(j)].cartesian - atoms[static_cast<std::size_t>(i)].cartesian;
-            const double dist = diff.length();
-            if (dist <= cutoff) {
-                bonds.push_back({j, i, {}, dist});
-            }
+                        BondDistanceRange range;
+                        if (!effectiveBondRange(
+                                m_displayOptions.customBondRanges,
+                                atoms[static_cast<std::size_t>(i)].element,
+                                atoms[static_cast<std::size_t>(j)].element,
+                                &range)) {
+                            continue;
+                        }
+                        const QVector3D diff = atoms[static_cast<std::size_t>(j)].cartesian - atoms[static_cast<std::size_t>(i)].cartesian;
+                        const double dist = diff.length();
+                        if (distanceInRange(dist, range)) {
+                            bonds.push_back({j, i, {}, dist});
+                        }
                     }
                 }
             }
@@ -564,6 +608,7 @@ void StructureCanvas::paintEvent(QPaintEvent*) {
         QPointF a;
         QPointF b;
         double depth;
+        bool preview;
     };
 
     struct PaintItem {
@@ -598,8 +643,41 @@ void StructureCanvas::paintEvent(QPaintEvent*) {
             paintBonds.push_back({
                 projectPoint(aEdge, viewport, scale),
                 projectPoint(bEdge, viewport, scale),
-                (aRot.z() + bRot.z()) * 0.5 - 0.35
+                (aRot.z() + bRot.z()) * 0.5 - 0.35,
+                false
             });
+        }
+        for (int i = 0; i < static_cast<int>(m_previewAtoms.size()); ++i) {
+            for (int j = i + 1; j < static_cast<int>(m_previewAtoms.size()); ++j) {
+                const auto& a = m_previewAtoms[static_cast<std::size_t>(i)];
+                const auto& b = m_previewAtoms[static_cast<std::size_t>(j)];
+                BondDistanceRange range;
+                if (!effectiveBondRange(m_displayOptions.customBondRanges, a.element, b.element, &range)) {
+                    range = BondDistanceRange{0.0, (vestaElementRadius(a.element) + vestaElementRadius(b.element)) * 0.85};
+                }
+                const QVector3D diff = b.cartesian - a.cartesian;
+                const double distance = diff.length();
+                range.maxDistance += 0.15;
+                if (distance <= 1.0e-6 || !distanceInRange(distance, range)) {
+                    continue;
+                }
+                const QVector3D direction = diff / static_cast<float>(distance);
+                const double trimA = visualAtomRadius(a, m_displayOptions.atomScale, densityScale);
+                const double trimB = visualAtomRadius(b, m_displayOptions.atomScale, densityScale);
+                if (distance <= trimA + trimB) {
+                    continue;
+                }
+                const QVector3D aEdge = a.cartesian - center + direction * static_cast<float>(trimA);
+                const QVector3D bEdge = b.cartesian - center - direction * static_cast<float>(trimB);
+                const auto aRot = rotatePoint(aEdge);
+                const auto bRot = rotatePoint(bEdge);
+                paintBonds.push_back({
+                    projectPoint(aEdge, viewport, scale),
+                    projectPoint(bEdge, viewport, scale),
+                    (aRot.z() + bRot.z()) * 0.5 - 0.35,
+                    true
+                });
+            }
         }
     }
 
@@ -638,7 +716,7 @@ void StructureCanvas::paintEvent(QPaintEvent*) {
             true,
             atom.atomId,
             0,
-            atom.element
+            atom.tag
         });
     }
 
@@ -675,15 +753,22 @@ void StructureCanvas::paintEvent(QPaintEvent*) {
     };
 
     auto drawBond = [&](const PaintedBond& bond) {
-            if (m_displayOptions.depthCue) {
-                QColor bondColor("#707070");
-                const int alpha = static_cast<int>(std::clamp(140.0 + bond.depth * 8.0, 90.0, 220.0));
-                bondColor.setAlpha(alpha);
-                painter.setPen(QPen(bondColor, 2.0));
-            } else {
-                painter.setPen(QPen(QColor("#707070"), 2.0));
-            }
+        if (bond.preview) {
+            QColor bondColor("#2D7FF9");
+            bondColor.setAlpha(150);
+            painter.setPen(QPen(bondColor, 2.0, Qt::DashLine));
             painter.drawLine(bond.a, bond.b);
+            return;
+        }
+        if (m_displayOptions.depthCue) {
+            QColor bondColor("#707070");
+            const int alpha = static_cast<int>(std::clamp(140.0 + bond.depth * 8.0, 90.0, 220.0));
+            bondColor.setAlpha(alpha);
+            painter.setPen(QPen(bondColor, 2.0));
+        } else {
+            painter.setPen(QPen(QColor("#707070"), 2.0));
+        }
+        painter.drawLine(bond.a, bond.b);
     };
 
     auto drawAtom = [&](const PaintedAtom& atom) {
@@ -713,15 +798,17 @@ void StructureCanvas::paintEvent(QPaintEvent*) {
             painter.setPen(QPen(QColor("#2D7FF9"), 1.2, Qt::DashLine));
             painter.setBrush(Qt::NoBrush);
             painter.drawEllipse(atom.pos, atom.radius + 4.0, atom.radius + 4.0);
-            QFont font = painter.font();
-            font.setBold(true);
-            font.setPointSizeF(8.5);
-            drawTextOutline(
-                atom.pos + QPointF(0.0, -atom.radius - 14.0),
-                m_japanese ? QStringLiteral("配置プレビュー") : QStringLiteral("preview"),
-                QColor("#2D7FF9"),
-                QColor("#FFFFFF"),
-                font);
+            if (!atom.label.trimmed().isEmpty()) {
+                QFont font = painter.font();
+                font.setBold(true);
+                font.setPointSizeF(8.5);
+                drawTextOutline(
+                    atom.pos + QPointF(0.0, -atom.radius - 14.0),
+                    atom.label,
+                    QColor("#2D7FF9"),
+                    QColor("#FFFFFF"),
+                    font);
+            }
             return;
         }
         if (atom.selected) {
