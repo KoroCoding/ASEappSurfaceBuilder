@@ -43,31 +43,25 @@
 
 ## インストール
 
-配布バイナリは GitHub Releases で管理します。リポジトリ本体には、再生成可能な `.exe` / `.zip` / `.dmg` / build 出力は含めません。
+確認済みの配布バイナリは `standalone_exe/` に同梱しています。GitHub Releases にも添付できますが、この checkout だけで使う場合は次のファイルを直接使えます。
 
 | OS | 推奨 | 備考 |
 | --- | --- | --- |
-| Windows | [Releases](https://github.com/KoroCoding/ASEappSurfaceBuilder/releases/latest) の単体 `.exe` | ZIP 版はフォルダ構成を崩さず `bin\ASEappNativeUI.exe` を起動してください。 |
-| macOS | ソースからビルド、または `PACKAGING.md` の DMG 手順 | Release に DMG がない場合はローカルで作成してください。 |
+| Windows | [`standalone_exe/windows/ASEappSurfaceBuilder-1.0.0-Windows.exe`](standalone_exe/windows/ASEappSurfaceBuilder-1.0.0-Windows.exe) | 現在同梱している Windows 版は v1.0.0 です。v1.1.0 Windows 版は Windows 環境で再生成してください。 |
+| macOS | [`standalone_exe/macos/ASEappSurfaceBuilder-1.1.0-macOS.dmg`](standalone_exe/macos/ASEappSurfaceBuilder-1.1.0-macOS.dmg) | v1.0.0 の DMG も [`standalone_exe/macos/`](standalone_exe/macos/) に残しています。 |
 | Linux | ソースからビルド | Qt 6 と CMake が必要です。 |
 
-### Windows: 単体 EXE を直接ダウンロード
+### Windows: 同梱 EXE を起動
 
-```powershell
-$repo = "KoroCoding/ASEappSurfaceBuilder"
-$release = Invoke-RestMethod -Uri "https://api.github.com/repos/$repo/releases/latest"
-$asset = $release.assets | Where-Object { $_.name -match "Windows\.exe$" } | Select-Object -First 1
-if (-not $asset) { throw "Windows .exe asset was not found in the latest release." }
-$out = Join-Path $env:USERPROFILE "Downloads\$($asset.name)"
-Invoke-WebRequest -Uri $asset.browser_download_url -OutFile $out
-Start-Process $out
-```
+`standalone_exe/windows/ASEappSurfaceBuilder-1.0.0-Windows.exe` を実行してください。
 
-手動で取得する場合は、[Releases](https://github.com/KoroCoding/ASEappSurfaceBuilder/releases/latest) を開いて最新の Windows 版をダウンロードしてください。
+v1.1.0 の Windows 版が必要な場合は、Windows 環境で `PACKAGING.md` の手順に従って `ASEappSurfaceBuilder-1.1.0-Windows.exe` を生成してください。
 
-### macOS / Linux
+### macOS
 
-現在の公開 Release に目的の OS 用バイナリがない場合は、次の「ソースからビルド」を使ってください。macOS の `.dmg` 作成・署名・notarization の考え方は [`PACKAGING.md`](PACKAGING.md) に分けています。
+最新の macOS 版は `standalone_exe/macos/ASEappSurfaceBuilder-1.1.0-macOS.dmg` です。過去版として `ASEappSurfaceBuilder-1.0.0-macOS.dmg` も同じフォルダに残しています。
+
+macOS の `.dmg` 作成・署名・notarization の考え方は [`PACKAGING.md`](PACKAGING.md) に分けています。
 
 ## ソースからビルド
 
@@ -192,10 +186,10 @@ release_notes/        バージョン別リリースノート
 PACKAGING.md          配布物の再生成手順
 environment.yml       Conda 環境定義
 requirements.txt      Python 補助ツール用依存関係
-standalone_exe/       ローカル生成物置き場（git 追跡対象外）
+standalone_exe/       確認済み配布物（Windows / macOS）
 ```
 
-公開リポジトリには、ローカル生成された build 出力、証明書、単体 EXE、DMG、仕様書などを含めない方針です。必要な配布物は GitHub Releases に添付してください。
+このリポジトリには、確認済みの `standalone_exe/` 配布物を含めています。`code/native_ui/build/`、`code/native_ui/dist/`、証明書、秘密鍵、仕様書などのローカル生成物は含めません。
 
 ## 開発時の確認
 

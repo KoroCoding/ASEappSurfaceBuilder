@@ -1,7 +1,9 @@
 #include "StructureCanvas.h"
 #include "ElementStyle.h"
 
+#include <QEvent>
 #include <QMouseEvent>
+#include <QNativeGestureEvent>
 #include <QPainter>
 #include <QPainterPath>
 #include <QFontMetrics>
@@ -280,6 +282,21 @@ void StructureCanvas::zoomBy(double factor) {
         return;
     }
     m_zoom = std::clamp(m_zoom * factor, 0.35, 4.0);
+    update();
+}
+
+void StructureCanvas::zoomAt(double factor, const QPointF& position) {
+    if (factor <= 0.0 || !std::isfinite(factor)) {
+        return;
+    }
+
+    const QRectF viewport = rect().adjusted(18, 18, -18, -18);
+    const QPointF focus = viewport.contains(position) ? position : viewport.center();
+    const QPointF focusFromViewCenter = focus - viewport.center();
+    const double oldZoom = m_zoom;
+    m_zoom = std::clamp(m_zoom * factor, 0.35, 4.0);
+    const double appliedFactor = oldZoom <= 1.0e-9 ? 1.0 : (m_zoom / oldZoom);
+    m_panOffset += (focusFromViewCenter - m_panOffset) * (1.0 - appliedFactor);
     update();
 }
 
@@ -937,19 +954,19 @@ void StructureCanvas::paintEvent(QPaintEvent*) {
     QString footer;
     if (m_japanese) {
         if (m_interactionMode == InteractionMode::MoveModel) {
-            footer = QStringLiteral("モデル表示移動モード: 左ドラッグ=モデル全体の表示位置を移動   Ctrl+クリック/ドラッグ=重なりも選択   Esc=選択解除   ホイール=ズーム   F=フィット");
+            footer = QStringLiteral("モデル表示移動モード: 左ドラッグ=モデル全体の表示位置を移動   Ctrl+クリック/ドラッグ=重なりも選択   Esc=選択解除   ホイール/ピンチ=ズーム   F=フィット");
         } else if (m_interactionMode == InteractionMode::MoveAtoms) {
-            footer = QStringLiteral("原子移動モード: 左ドラッグ=選択原子を移動   Ctrl+クリック/ドラッグ=重なりも選択   Esc=選択解除   右/中ドラッグ=パン   ホイール=ズーム   F=フィット");
+            footer = QStringLiteral("原子移動モード: 左ドラッグ=選択原子を移動   Ctrl+クリック/ドラッグ=重なりも選択   Esc=選択解除   右/中ドラッグ=パン   ホイール/ピンチ=ズーム   F=フィット");
         } else {
-            footer = QStringLiteral("視点モード: 左ドラッグ=回転   Ctrl+クリック/ドラッグ=重なりも選択   Esc=選択解除   Shift+左ドラッグ=選択原子を移動   右/中ドラッグ=パン   ホイール=ズーム   F=フィット");
+            footer = QStringLiteral("視点モード: 左ドラッグ=回転   Ctrl+クリック/ドラッグ=重なりも選択   Esc=選択解除   Shift+左ドラッグ=選択原子を移動   右/中ドラッグ=パン   ホイール/ピンチ=ズーム   F=フィット");
         }
     } else {
         if (m_interactionMode == InteractionMode::MoveModel) {
-            footer = QStringLiteral("Move model display mode: Left drag pans the whole model display   Ctrl+click/drag selects overlaps   Esc clears selection   Wheel zooms   F fits");
+            footer = QStringLiteral("Move model display mode: Left drag pans the whole model display   Ctrl+click/drag selects overlaps   Esc clears selection   Wheel/pinch zooms   F fits");
         } else if (m_interactionMode == InteractionMode::MoveAtoms) {
-            footer = QStringLiteral("Move atoms mode: Left drag moves selected atoms   Ctrl+click/drag selects overlaps   Esc clears selection   Right/Middle drag pans   Wheel zooms   F fits");
+            footer = QStringLiteral("Move atoms mode: Left drag moves selected atoms   Ctrl+click/drag selects overlaps   Esc clears selection   Right/Middle drag pans   Wheel/pinch zooms   F fits");
         } else {
-            footer = QStringLiteral("Move view mode: Left drag rotates   Ctrl+click/drag selects overlaps   Esc clears selection   Shift+left drag moves selected atoms   Right/Middle drag pans   Wheel zooms   F fits");
+            footer = QStringLiteral("Move view mode: Left drag rotates   Ctrl+click/drag selects overlaps   Esc clears selection   Shift+left drag moves selected atoms   Right/Middle drag pans   Wheel/pinch zooms   F fits");
         }
     }
     painter.drawText(
@@ -1175,14 +1192,23 @@ void StructureCanvas::wheelEvent(QWheelEvent* event) {
         event->accept();
         return;
     }
-    const QRectF viewport = rect().adjusted(18, 18, -18, -18);
-    const QPointF cursor = event->position();
-    const QPointF cursorFromViewCenter = cursor - viewport.center();
-    const double oldZoom = m_zoom;
     const double factor = std::max(0.05, 1.0 + steps * 0.12);
-    m_zoom = std::clamp(m_zoom * factor, 0.35, 4.0);
-    const double appliedFactor = oldZoom <= 1.0e-9 ? 1.0 : (m_zoom / oldZoom);
-    m_panOffset += (cursorFromViewCenter - m_panOffset) * (1.0 - appliedFactor);
-    update();
+    zoomAt(factor, event->position());
     event->accept();
+}
+
+bool StructureCanvas::event(QEvent* event) {
+    if (event->type() == QEvent::NativeGesture) {
+        auto* gesture = static_cast<QNativeGestureEvent*>(event);
+        if (gesture->gestureType() == Qt::ZoomNativeGesture) {
+            const double value = gesture->value();
+            if (std::abs(value) > 1.0e-6) {
+                zoomAt(std::clamp(std::exp(value), 0.05, 20.0), gesture->position());
+            }
+            event->accept();
+            return true;
+        }
+    }
+
+    return QWidget::event(event);
 }

@@ -8,19 +8,25 @@
 code/native_ui/                          # C++ / Qt ソースコード
 requirements.txt                         # Python補助ツール用ライブラリ
 environment.yml                          # Conda環境構築用
-standalone_exe/                          # ローカル配布物出力先（git 追跡対象外）
+standalone_exe/                          # 確認済み配布物の配置先
 ```
 
 ## 最終配布物
 
-GitHub Releases には次の名前でアップロードします。
+現在リポジトリに同梱している確認済み配布物は次の通りです。
+
+- Windows: `standalone_exe/windows/ASEappSurfaceBuilder-1.0.0-Windows.exe`
+- macOS: `standalone_exe/macos/ASEappSurfaceBuilder-1.0.0-macOS.dmg`
+- macOS: `standalone_exe/macos/ASEappSurfaceBuilder-1.1.0-macOS.dmg`
+
+次回以降の GitHub Releases には次の名前でアップロードします。
 
 - Windows 単体 launcher: `ASEappSurfaceBuilder-1.1.0-Windows.exe`
 - Windows ZIP: `ASEappSurfaceBuilder-1.1.0-Windows.zip`
 - Linux: `ASEappSurfaceBuilder-1.1.0-Linux.tar.gz`
 - macOS: `ASEappSurfaceBuilder-1.1.0-macOS.dmg`（macOS 上で再ビルドした場合）
 
-配布物はローカルでは `standalone_exe/` や `code/native_ui/dist/` に生成しますが、公開リポジトリでは追跡せず、GitHub Releases に添付します。
+配布物はローカルでは `standalone_exe/` や `code/native_ui/dist/` に生成します。確認済みの最終成果物だけを `standalone_exe/<platform>/` に置き、途中生成物はコミットしません。
 
 Windows では通常、単体 launcher 版だけを配布すれば十分です。
 
@@ -63,6 +69,8 @@ powershell -ExecutionPolicy Bypass -File code/native_ui/package_windows_launcher
 ```text
 standalone_exe/windows/ASEappSurfaceBuilder-1.1.0-Windows.exe
 ```
+
+現在このリポジトリに同梱している Windows 版は `standalone_exe/windows/ASEappSurfaceBuilder-1.0.0-Windows.exe` です。v1.1.0 Windows 版は Windows 環境で上記手順を実行して生成してください。
 
 ### ローカル署名（開発確認用）
 
@@ -123,6 +131,8 @@ macOS では次のスクリプトを使ってください。
 ```text
 standalone_exe/macos/ASEappSurfaceBuilder-1.1.0-macOS.dmg
 ```
+
+互換確認用として `standalone_exe/macos/ASEappSurfaceBuilder-1.0.0-macOS.dmg` も残しています。
 
 `Documents/GitHub` など macOS FileProvider 配下で直接 CPack staging を作ると、`com.apple.FinderInfo` などの拡張属性が `.app` に付いて `codesign` が失敗することがあります。そのため、スクリプトは staging を `/private/tmp/aseapp-surface-builder-cpack` に作成し、検証済み DMG だけを `standalone_exe/macos/` へコピーします。
 

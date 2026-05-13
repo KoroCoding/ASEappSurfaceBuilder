@@ -2,4 +2,6 @@
 # The C++/Qt application itself is built with CMake and Qt 6; see README.md.
 PySide6>=6.7
 Pillow>=10.0
+numpy>=1.26
+ase>=3.23
 pefile>=2024.8.26; platform_system == "Windows"

@@ -8,4 +8,6 @@ dependencies:
   - qt6-main
   - pyside6
   - pillow
+  - numpy
+  - ase
   - pefile

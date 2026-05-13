@@ -65,6 +65,7 @@ protected:
     void mouseReleaseEvent(QMouseEvent* event) override;
     void mouseDoubleClickEvent(QMouseEvent* event) override;
     void wheelEvent(QWheelEvent* event) override;
+    bool event(QEvent* event) override;
 
 private:
     struct BondSegment {
@@ -93,6 +94,7 @@ private:
     QRect ctrlSelectionRect() const;
     QRect visibleCtrlSelectionRect() const;
     void updateInteractionCursor();
+    void zoomAt(double factor, const QPointF& position);
 
     StructureData m_structure;
     std::vector<NativeAtom> m_previewAtoms;

@@ -1,5 +1,6 @@
 # Local generated files
 $tmp/
+.DS_Store
 code/native_ui/build/
 code/native_ui/install/
 code/native_ui/dist/
@@ -13,7 +14,6 @@ CMakeUserPresets.json
 
 # Public-release local/private artifacts
 /仕様書.md
-/standalone_exe/
 *.pfx
 *.p12
 *.key
