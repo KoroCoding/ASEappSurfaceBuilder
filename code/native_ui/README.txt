@@ -1,4 +1,4 @@
-﻿ASEapp Surface Builder
+ASEapp Surface Builder
 ======================
 
 このフォルダは ASEapp Surface Builder の配布物です。
@@ -6,7 +6,7 @@
 起動方法
 --------
 - 単体 launcher 版を使う場合:
-  ASEappSurfaceBuilder-1.1.1-Windows.exe を実行します。
+  ASEappSurfaceBuilder-1.1.2-Windows.exe を実行します。
 
 - ZIP 展開版を使う場合:
   bin\ASEappNativeUI.exe を実行します。

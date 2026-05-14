@@ -1,4 +1,4 @@
-﻿# ASEapp Surface Builder
+# ASEapp Surface Builder
 
 **ASEapp Surface Builder** は、第一原理計算・表面反応モデル作成の前処理を支援する C++ / Qt デスクトップアプリです。VESTA に近い感覚で構造を見ながら、slab、supercell、真空層、吸着原子、前駆体、吸着分子ポーズを編集できます。
 
@@ -10,7 +10,7 @@
 
 | やりたいこと | 最短ルート |
 | --- | --- |
-| アプリを起動したい | 同梱 Windows 版 [`standalone_exe/windows/ASEappSurfaceBuilder-1.1.1-Windows.exe`](standalone_exe/windows/ASEappSurfaceBuilder-1.1.1-Windows.exe) を実行 |
+| アプリを起動したい | 同梱 Windows 版 [`standalone_exe/windows/ASEappSurfaceBuilder-1.1.2-Windows.exe`](standalone_exe/windows/ASEappSurfaceBuilder-1.1.2-Windows.exe) を実行 |
 | 画面を見ながら使い方を知りたい | [操作ガイド `Guide.md`](Guide.md) を開く |
 | 自分でビルドしたい | [ソースからビルド](#ソースからビルド) を実行 |
 | 配布物を作り直したい | [`PACKAGING.md`](PACKAGING.md) を参照 |
@@ -49,13 +49,13 @@
 
 | OS | 推奨 | 備考 |
 | --- | --- | --- |
-| Windows | [`standalone_exe/windows/ASEappSurfaceBuilder-1.1.1-Windows.exe`](standalone_exe/windows/ASEappSurfaceBuilder-1.1.1-Windows.exe) | 現在同梱している Windows 版は v1.1.1 です。互換確認用として v1.1.0 / v1.0.0 も同じフォルダに残しています。 |
+| Windows | [`standalone_exe/windows/ASEappSurfaceBuilder-1.1.2-Windows.exe`](standalone_exe/windows/ASEappSurfaceBuilder-1.1.2-Windows.exe) | 現在同梱している Windows 版は v1.1.2 です。互換確認用として v1.1.1 / v1.1.0 / v1.0.0 も同じフォルダに残しています。 |
 | macOS | [`standalone_exe/macos/ASEappSurfaceBuilder-1.1.0-macOS.dmg`](standalone_exe/macos/ASEappSurfaceBuilder-1.1.0-macOS.dmg) | v1.0.0 の DMG も [`standalone_exe/macos/`](standalone_exe/macos/) に残しています。 |
 | Linux | ソースからビルド | Qt 6 と CMake が必要です。 |
 
 ### Windows: 同梱 EXE を起動
 
-`standalone_exe/windows/ASEappSurfaceBuilder-1.1.1-Windows.exe` を実行してください。
+`standalone_exe/windows/ASEappSurfaceBuilder-1.1.2-Windows.exe` を実行してください。
 
 ### macOS
 
@@ -217,7 +217,7 @@ ctest --test-dir code/native_ui/build -C Debug --output-on-failure
 | 症状 | 対処 |
 | --- | --- |
 | `freetype.dll` などが見つからない | ZIP 版は展開フォルダ全体を保ったまま起動してください。単体 EXE 版なら DLL 同梱の launcher を使えます。 |
-| `no Qt platform plugin could be initialized` が出る | v1.1.1 の再生成版では起動時に同梱 `plugins/platforms/qwindows.dll` を自動指定します。古い ZIP から `bin` だけを抜き出した場合は、ZIP 全体を展開するか単体 EXE 版を使ってください。 |
+| `no Qt platform plugin could be initialized` が出る | v1.1.2 の再生成版では起動時に同梱 `plugins/platforms/qwindows.dll` を自動指定します。古い ZIP から `bin` だけを抜き出した場合は、ZIP 全体を展開するか単体 EXE 版を使ってください。 |
 | Windows Application Control / Smart App Control で止まる | DLL 不足ではなく Windows 側の実行制御です。広く配布する正式版は信頼済みコード署名を推奨します。 |
 | 画面が重い | ボンド表示、ラベル、プレビューを必要な時だけ有効にし、Supercell を大きくしすぎないでください。 |
 | 原子配置位置がわかりにくい | `配置プレビューを表示` をオンにして、半透明の予定位置を確認してから `配置する` を押してください。 |

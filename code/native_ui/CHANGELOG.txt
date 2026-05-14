@@ -1,8 +1,17 @@
-﻿ASEapp Surface Builder CHANGELOG
+ASEapp Surface Builder CHANGELOG
 ================================
 
 Unreleased
 ----------
+
+Version 1.1.2 - Refactor and verified Windows rebuild
+------------------------------------------------------
+- 起動時の Qt plugin path 設定を AppStartup に分離し、main.cpp を起動フローへ集中させました。
+- 単一起動と既存ウィンドウへのファイル転送を SingleInstance に分離しました。
+- Windows standalone launcher の HANDLE / LocalFree 管理を RAII 化し、機能を変えずに解放経路を単純化しました。
+- VERSIONING.md を追加し、今後の SemVer ベースの番号付け基準を明文化しました。
+- Windows 単体 launcher / ZIP を v1.1.2 として再生成し、Release build、CTest、起動確認、署名確認を実施しました。
+
 - CIF 読み込み時に `_space_group_symop_operation_xyz` / `_symmetry_equiv_pos_as_xyz` の対称操作を展開し、代表点だけでなく単位胞内の原子を描画するように修正。
 - CIF のインラインコメントを quote-aware に無視し、セル値や対称操作行の末尾コメントで読み込みが崩れないように修正。
 - VASP/POSCAR 保存で Direct / Cartesian を選択できるように変更。

@@ -1,8 +1,8 @@
-﻿cmake_minimum_required(VERSION 3.21)
+cmake_minimum_required(VERSION 3.21)
 if(POLICY CMP0091)
   cmake_policy(SET CMP0091 NEW)
 endif()
-project(aseapp_native_ui VERSION 1.1.1 LANGUAGES CXX)
+project(aseapp_native_ui VERSION 1.1.2 LANGUAGES CXX)
 
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -70,6 +70,10 @@ set(ASEAPP_NATIVE_UI_COMMON_SOURCES
 )
 
 add_executable(aseapp_native_ui
+  src/AppStartup.cpp
+  src/AppStartup.h
+  src/SingleInstance.cpp
+  src/SingleInstance.h
   src/main.cpp
   ${ASEAPP_NATIVE_UI_COMMON_SOURCES}
 )

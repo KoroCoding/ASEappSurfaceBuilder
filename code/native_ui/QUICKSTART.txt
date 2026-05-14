@@ -1,9 +1,9 @@
-﻿ASEapp Surface Builder クイックスタート
+ASEapp Surface Builder クイックスタート
 ======================================
 
 1. 起動
 ------
-- 単体版: ASEappSurfaceBuilder-1.1.1-Windows.exe を実行します。
+- 単体版: ASEappSurfaceBuilder-1.1.2-Windows.exe を実行します。
 - 展開版: bin\ASEappNativeUI.exe を実行します。
 
 2. 構造を開く
