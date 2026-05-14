@@ -67,6 +67,76 @@ std::wstring JoinArgs(int argc, wchar_t* argv[]) {
     return args;
 }
 
+std::wstring BuildSingleInstancePayload(int argc, wchar_t* argv[]) {
+    std::wstring payload;
+    for (int i = 1; i < argc; ++i) {
+        std::wstring arg = argv[i] != nullptr ? argv[i] : L"";
+        if (arg.empty() || arg.rfind(L"--", 0) == 0) {
+            continue;
+        }
+        fs::path path(arg);
+        if (path.is_relative()) {
+            path = fs::absolute(path);
+        }
+        if (!payload.empty()) {
+            payload.push_back(L'\n');
+        }
+        payload += path.wstring();
+    }
+    if (payload.empty()) {
+        payload = L"__activate__";
+    }
+    return payload;
+}
+
+std::string ToUtf8(const std::wstring& text) {
+    if (text.empty()) {
+        return {};
+    }
+    const int size = WideCharToMultiByte(CP_UTF8, 0, text.c_str(), static_cast<int>(text.size()), nullptr, 0, nullptr, nullptr);
+    if (size <= 0) {
+        return {};
+    }
+    std::string utf8(static_cast<size_t>(size), '\0');
+    WideCharToMultiByte(CP_UTF8, 0, text.c_str(), static_cast<int>(text.size()), utf8.data(), size, nullptr, nullptr);
+    return utf8;
+}
+
+bool SendPayloadToExistingInstance(const std::wstring& payload, DWORD timeoutMs = 30000) {
+    const std::wstring pipeName = L"\\\\.\\pipe\\ASEappSurfaceBuilder.SingleInstance";
+    const ULONGLONG deadline = GetTickCount64() + timeoutMs;
+    const std::string utf8Payload = ToUtf8(payload);
+    if (utf8Payload.empty()) {
+        return false;
+    }
+
+    while (GetTickCount64() < deadline) {
+        HANDLE pipe = CreateFileW(pipeName.c_str(), GENERIC_WRITE, 0, nullptr, OPEN_EXISTING, 0, nullptr);
+        if (pipe != INVALID_HANDLE_VALUE) {
+            DWORD written = 0;
+            const BOOL ok = WriteFile(pipe, utf8Payload.data(), static_cast<DWORD>(utf8Payload.size()), &written, nullptr);
+            FlushFileBuffers(pipe);
+            CloseHandle(pipe);
+            return ok && written == utf8Payload.size();
+        }
+
+        const DWORD error = GetLastError();
+        if (error == ERROR_PIPE_BUSY) {
+            WaitNamedPipeW(pipeName.c_str(), 250);
+        } else {
+            Sleep(250);
+        }
+    }
+    return false;
+}
+
+void ActivateExistingWindow() {
+    if (HWND existingWindow = FindWindowW(nullptr, L"ASEapp Surface Builder")) {
+        ShowWindow(existingWindow, SW_RESTORE);
+        SetForegroundWindow(existingWindow);
+    }
+}
+
 bool WriteResourceToFile(int resourceId, const wchar_t* resourceType, const fs::path& outputPath) {
     HRSRC resource = FindResourceW(nullptr, MAKEINTRESOURCEW(resourceId), resourceType);
     if (!resource) {
@@ -134,6 +204,15 @@ int WINAPI wWinMain(HINSTANCE, HINSTANCE, PWSTR, int) {
         return 1;
     }
 
+    HANDLE singleInstanceMutex = CreateMutexW(nullptr, TRUE, L"Local\\ASEappSurfaceBuilder.StandaloneLauncher.Mutex");
+    if (singleInstanceMutex != nullptr && GetLastError() == ERROR_ALREADY_EXISTS) {
+        SendPayloadToExistingInstance(BuildSingleInstancePayload(argc, argv));
+        ActivateExistingWindow();
+        CloseHandle(singleInstanceMutex);
+        LocalFree(argv);
+        return 0;
+    }
+
     const fs::path tempRoot = fs::temp_directory_path() / (L"aseapp_surface_builder_" + std::to_wstring(GetCurrentProcessId()));
     const fs::path payloadRoot = tempRoot / L"payload";
     const fs::path payloadZip = tempRoot / L"payload.zip";
@@ -141,6 +220,9 @@ int WINAPI wWinMain(HINSTANCE, HINSTANCE, PWSTR, int) {
 
     if (!WriteResourceToFile(101, reinterpret_cast<const wchar_t*>(RT_RCDATA), payloadZip)) {
         ShowError(L"Embedded payload resource was not found.");
+        if (singleInstanceMutex != nullptr) {
+            CloseHandle(singleInstanceMutex);
+        }
         LocalFree(argv);
         return 1;
     }
@@ -152,11 +234,17 @@ int WINAPI wWinMain(HINSTANCE, HINSTANCE, PWSTR, int) {
         L"' -DestinationPath '" + EscapePowerShellSingleQuoted(payloadRoot.wstring()) + L"' -Force";
     if (!RunProcess(powershell, L"-NoProfile -ExecutionPolicy Bypass -Command " + QuoteArg(expandScript), tempRoot, exitCode, CREATE_NO_WINDOW)) {
         ShowError(L"Failed to expand the embedded ZIP. PowerShell may be unavailable.");
+        if (singleInstanceMutex != nullptr) {
+            CloseHandle(singleInstanceMutex);
+        }
         LocalFree(argv);
         return 1;
     }
     if (exitCode != 0) {
         ShowError(L"Failed to expand the embedded ZIP.");
+        if (singleInstanceMutex != nullptr) {
+            CloseHandle(singleInstanceMutex);
+        }
         LocalFree(argv);
         return static_cast<int>(exitCode);
     }
@@ -165,6 +253,9 @@ int WINAPI wWinMain(HINSTANCE, HINSTANCE, PWSTR, int) {
     if (!fs::exists(appExe)) {
         ShowError(L"ASEappNativeUI.exe was not found after extraction.");
         fs::remove_all(tempRoot);
+        if (singleInstanceMutex != nullptr) {
+            CloseHandle(singleInstanceMutex);
+        }
         LocalFree(argv);
         return 1;
     }
@@ -175,6 +266,9 @@ int WINAPI wWinMain(HINSTANCE, HINSTANCE, PWSTR, int) {
     if (!fs::exists(windowsPlatformPlugin)) {
         ShowError(L"Qt platform plugin qwindows.dll was not found in the embedded payload.");
         fs::remove_all(tempRoot);
+        if (singleInstanceMutex != nullptr) {
+            CloseHandle(singleInstanceMutex);
+        }
         LocalFree(argv);
         return 1;
     }
@@ -185,11 +279,17 @@ int WINAPI wWinMain(HINSTANCE, HINSTANCE, PWSTR, int) {
     if (!RunProcess(appExe, innerArgs, appExe.parent_path(), exitCode)) {
         ShowError(L"Failed to launch ASEappNativeUI.exe.");
         fs::remove_all(tempRoot);
+        if (singleInstanceMutex != nullptr) {
+            CloseHandle(singleInstanceMutex);
+        }
         LocalFree(argv);
         return 1;
     }
 
     fs::remove_all(tempRoot);
+    if (singleInstanceMutex != nullptr) {
+        CloseHandle(singleInstanceMutex);
+    }
     LocalFree(argv);
     return static_cast<int>(exitCode);
 }
