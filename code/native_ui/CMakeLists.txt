@@ -112,6 +112,47 @@ set_target_properties(aseapp_native_ui PROPERTIES
   OUTPUT_NAME "ASEappNativeUI"
 )
 
+set(ASEAPP_QT_PLUGIN_SEARCH_DIRS)
+if(WIN32)
+  if(DEFINED ENV{CONDA_PREFIX})
+    file(TO_CMAKE_PATH "$ENV{CONDA_PREFIX}/Library/lib/qt6/plugins" ASEAPP_CONDA_QT_PLUGIN_DIR)
+    list(APPEND ASEAPP_QT_PLUGIN_SEARCH_DIRS "${ASEAPP_CONDA_QT_PLUGIN_DIR}")
+  endif()
+  foreach(ASEAPP_PREFIX IN LISTS CMAKE_PREFIX_PATH)
+    list(APPEND ASEAPP_QT_PLUGIN_SEARCH_DIRS
+      "${ASEAPP_PREFIX}/lib/qt6/plugins"
+      "${ASEAPP_PREFIX}/Library/lib/qt6/plugins"
+      "${ASEAPP_PREFIX}/plugins"
+    )
+  endforeach()
+  list(REMOVE_DUPLICATES ASEAPP_QT_PLUGIN_SEARCH_DIRS)
+  foreach(ASEAPP_PLUGIN_DIR IN LISTS ASEAPP_QT_PLUGIN_SEARCH_DIRS)
+    if(EXISTS "${ASEAPP_PLUGIN_DIR}/platforms/qwindows.dll")
+      set(ASEAPP_QT_PLUGIN_DIR "${ASEAPP_PLUGIN_DIR}")
+      break()
+    endif()
+  endforeach()
+endif()
+
+function(aseapp_prepare_windows_build_runtime target_name)
+  if(NOT WIN32 OR NOT ASEAPP_QT_PLUGIN_DIR)
+    return()
+  endif()
+  set(ASEAPP_BUILD_QT_CONF "${CMAKE_CURRENT_BINARY_DIR}/${target_name}_qt.conf")
+  file(WRITE "${ASEAPP_BUILD_QT_CONF}" "[Paths]\nPlugins = plugins\n")
+  add_custom_command(TARGET ${target_name} POST_BUILD
+    COMMAND ${CMAKE_COMMAND} -E copy_directory
+      "${ASEAPP_QT_PLUGIN_DIR}"
+      "$<TARGET_FILE_DIR:${target_name}>/plugins"
+    COMMAND ${CMAKE_COMMAND} -E copy_if_different
+      "${ASEAPP_BUILD_QT_CONF}"
+      "$<TARGET_FILE_DIR:${target_name}>/qt.conf"
+    COMMENT "Copying Qt plugins for direct Windows build-tree launches"
+  )
+endfunction()
+
+aseapp_prepare_windows_build_runtime(aseapp_native_ui)
+
 install(TARGETS aseapp_native_ui
   BUNDLE DESTINATION .
   RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR}

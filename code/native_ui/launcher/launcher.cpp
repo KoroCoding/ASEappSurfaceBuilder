@@ -169,6 +169,18 @@ int WINAPI wWinMain(HINSTANCE, HINSTANCE, PWSTR, int) {
         return 1;
     }
 
+    const fs::path pluginRoot = payloadRoot / L"plugins";
+    const fs::path platformRoot = pluginRoot / L"platforms";
+    const fs::path windowsPlatformPlugin = platformRoot / L"qwindows.dll";
+    if (!fs::exists(windowsPlatformPlugin)) {
+        ShowError(L"Qt platform plugin qwindows.dll was not found in the embedded payload.");
+        fs::remove_all(tempRoot);
+        LocalFree(argv);
+        return 1;
+    }
+    SetEnvironmentVariableW(L"QT_PLUGIN_PATH", pluginRoot.c_str());
+    SetEnvironmentVariableW(L"QT_QPA_PLATFORM_PLUGIN_PATH", platformRoot.c_str());
+
     const std::wstring innerArgs = JoinArgs(argc, argv);
     if (!RunProcess(appExe, innerArgs, appExe.parent_path(), exitCode)) {
         ShowError(L"Failed to launch ASEappNativeUI.exe.");

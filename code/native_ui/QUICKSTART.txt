@@ -11,7 +11,8 @@
 - Open を押すか、構造ファイルを画面へドラッグ&ドロップします。
 - 2回目以降にアプリを起動しても別ウィンドウは増えず、既存ウィンドウを前面へ戻します。
 - Ctrl + T で空のタブを追加、Ctrl + W で現在のタブを閉じます。
-- POSCAR / CONTCAR / .vasp / .xyz / .cif / .pdb / .xsf / .json / .aseproj / .vesta に対応しています。
+- POSCAR / CONTCAR / .vasp / .xyz / .extxyz / .cif / .pdb / .xsf / .json / .aseproj / .vesta に対応しています。
+- CIF は代表的な対称操作ループを展開して、非対称単位だけでなく単位胞内の原子を描画します。
 - ホイールまたはトラックパッドのピンチで、カーソル位置を基準にズームできます。
 
 3. 原子を選択する
@@ -67,5 +68,6 @@
 
 10. 保存
 ------
-- Save で POSCAR 形式として保存します。
+- Save で POSCAR / extended XYZ / 通常 XYZ 形式として保存します。
+- POSCAR は Direct / Cartesian、通常 XYZ は Cartesian / 分率座標を選択できます。
 - 重要な構造は、編集前に別名保存しておくと安全です。

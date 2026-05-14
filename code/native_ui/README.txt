@@ -14,7 +14,7 @@
 
 基本手順
 --------
-1. 構造ファイルをドラッグ&ドロップ、または Open で読み込みます。複数構造は既存ウィンドウ内のタブで切り替えます。2回目以降の起動では別ウィンドウを増やさず、既存ウィンドウを前面へ戻します。
+1. 構造ファイルをドラッグ&ドロップ、または Open で読み込みます。複数構造は既存ウィンドウ内のタブで切り替えます。2回目以降の起動では別ウィンドウを増やさず、既存ウィンドウを前面へ戻します。CIF は代表的な対称操作ループを展開して描画します。
 2. 原子をクリックして選択します。
    Ctrl + 左クリック/左ドラッグで重なった奥の原子も追加選択できます。
    Esc で選択解除できます。
@@ -25,11 +25,11 @@
 5. Supercell、真空層除去、セル軸傾き、slab全体移動を使って slab / terrace 候補を整えます。
    Supercell 後に真空層除去やセル軸傾きを行っても、現在倍率は保持されます。
 6. 原子一覧PNG で、発表用の球＋ラベル画像を出力できます。
-7. Save で POSCAR 形式として保存します。
+7. Save で POSCAR / extended XYZ / 通常 XYZ 形式として保存します。POSCAR は Direct / Cartesian、通常 XYZ は Cartesian / 分率座標を選択できます。
 
 対応入力
 --------
-POSCAR / CONTCAR / .vasp / .xyz / .cif / .pdb / .xsf / .json / .aseproj / .vesta
+POSCAR / CONTCAR / .vasp / .xyz / .extxyz / .cif / .pdb / .xsf / .json / .aseproj / .vesta
 
 主な操作
 --------
@@ -58,5 +58,6 @@ Ctrl+W: 現在の構造タブを閉じる
 - 原子一覧PNGは、論文図には 2000 px 以上または 300 dpi 以上を推奨します。
 - Qt / VC++ ランタイム DLL は配布物に同梱済みです。
 - DLL 不足エラーが出る場合は、bin 内の exe だけを単独で移動していないか確認してください。
+- "no Qt platform plugin could be initialized" が出る場合は古い配布物や bin だけの移動が原因です。単体 launcher 版を使うか、ZIP 全体を展開してください。
 
 詳しくは QUICKSTART.txt と CHANGELOG.txt も確認してください。

@@ -37,6 +37,8 @@
 
 `POSCAR` / `CONTCAR` / `.vasp` / `.xyz` / `.extxyz` / `.cif` / `.pdb` / `.xsf` / `.json` / `.aseproj` / `.vesta`
 
+CIF は `_space_group_symop_operation_xyz` / `_symmetry_equiv_pos_as_xyz` の対称操作を読み取り、非対称単位から単位胞内の原子を展開して描画します。
+
 ### 単一起動と構造タブ
 
 ASEapp Surface Builder は単一起動です。すでに起動中にもう一度 EXE を開くと、新しいウィンドウではなく既存ウィンドウが前面に戻ります。複数構造は `開く`、ドラッグ&ドロップ、`Ctrl+T` の空タブ追加で同じウィンドウ内のタブとして扱い、`Ctrl+W` で現在タブを閉じられます。
@@ -50,11 +52,11 @@ ASEapp Surface Builder は単一起動です。すでに起動中にもう一度
 | 保存先 | 内容 |
 | --- | --- |
 | `.aseproj` / `.json` | ASEapp の編集情報を保持したプロジェクト形式。再編集向き。 |
-| `POSCAR` / `CONTCAR` / `.vasp` / `.poscar` | VASP/POSCAR 形式。計算投入用。 |
+| `POSCAR` / `CONTCAR` / `.vasp` / `.poscar` | VASP/POSCAR 形式。Direct / Cartesian を保存時に選択可能。 |
 | `.extxyz` / extended XYZ | ASE に cell / PBC / cartesian 座標を戻す用途。slab 連携の推奨形式。 |
-| `.xyz` | 座標だけを渡す用途。通常 XYZ は cell / PBC を標準では保持しない。 |
+| `.xyz` | 座標だけを渡す用途。Cartesian / 分率座標を保存時に選択可能。通常 XYZ は cell / PBC を標準では保持しない。 |
 
-保存は `保存` または `Ctrl+Shift+S` です。保存前に構造診断が表示されるため、原子数やセル状態を確認してから保存できます。
+保存は `保存` または `Ctrl+Shift+S` です。保存前に構造診断が表示されるため、原子数やセル状態を確認してから保存できます。extended XYZ は ASE 互換のため Cartesian `pos` として保存します。
 
 ---
 

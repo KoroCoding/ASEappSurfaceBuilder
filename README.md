@@ -20,6 +20,7 @@
 
 - 構造ファイルを開き、球・ボンド・セル枠で確認できます。
 - アプリは単一起動に制限され、複数構造は既存ウィンドウ内のタブで切り替えられます。
+- CIF は `_space_group_symop_operation_xyz` / `_symmetry_equiv_pos_as_xyz` の対称操作を展開して描画します。
 - 原子を選択して、直上・直下・原子間・多点中心・面法線上に新しい原子を置けます。
 - Supercell、真空層、セル軸傾き、slab 全体移動を GUI で調整できます。
 - 前駆体 CSV を保存/読み込みし、同じ相対配置を別の表面位置に再利用できます。
@@ -95,9 +96,11 @@ cmake --build code/native_ui/build --config Release --parallel 2
 | --- | --- | --- |
 | VASP | `POSCAR`, `CONTCAR`, `.vasp`, `.poscar` | 計算投入前後の構造確認・保存 |
 | XYZ | `.xyz`, `.extxyz` | ASE とのやり取り。cell / PBC を残したい場合は extended XYZ 推奨 |
-| 結晶構造 | `.cif`, `.pdb`, `.xsf` | 外部データの読み込み |
+| 結晶構造 | `.cif`, `.pdb`, `.xsf` | 外部データの読み込み。CIF は代表的な対称操作ループを展開 |
 | ASEapp | `.aseproj`, `.json` | ASEapp の編集情報を保持した再編集用形式 |
 | VESTA | `.vesta` | VESTA 由来構造の取り込み |
+
+保存時は VASP/POSCAR で Direct / Cartesian、通常 XYZ で Cartesian / 分率座標を選択できます。extended XYZ は ASE 連携を優先し Cartesian `pos` として保存します。
 
 ## 主な機能
 
@@ -142,7 +145,7 @@ cmake --build code/native_ui/build --config Release --parallel 2
 4. 原子をクリックして基準原子を選択します。
 5. `生成元素` と `配置位置` を決め、必要な時だけ `配置プレビューを表示` をオンにします。
 6. `配置する` を押して原子を追加します。
-7. `保存` で `.aseproj`, POSCAR, extended XYZ などに保存します。
+7. `保存` で `.aseproj`, POSCAR, extended XYZ などに保存します。POSCAR は Direct / Cartesian、通常 XYZ は Cartesian / 分率座標を選べます。
 
 ## ショートカット
 
@@ -214,6 +217,7 @@ ctest --test-dir code/native_ui/build -C Debug --output-on-failure
 | 症状 | 対処 |
 | --- | --- |
 | `freetype.dll` などが見つからない | ZIP 版は展開フォルダ全体を保ったまま起動してください。単体 EXE 版なら DLL 同梱の launcher を使えます。 |
+| `no Qt platform plugin could be initialized` が出る | v1.1.1 の再生成版では起動時に同梱 `plugins/platforms/qwindows.dll` を自動指定します。古い ZIP から `bin` だけを抜き出した場合は、ZIP 全体を展開するか単体 EXE 版を使ってください。 |
 | Windows Application Control / Smart App Control で止まる | DLL 不足ではなく Windows 側の実行制御です。広く配布する正式版は信頼済みコード署名を推奨します。 |
 | 画面が重い | ボンド表示、ラベル、プレビューを必要な時だけ有効にし、Supercell を大きくしすぎないでください。 |
 | 原子配置位置がわかりにくい | `配置プレビューを表示` をオンにして、半透明の予定位置を確認してから `配置する` を押してください。 |

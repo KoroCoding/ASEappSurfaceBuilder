@@ -1,6 +1,16 @@
 ﻿ASEapp Surface Builder CHANGELOG
 ================================
 
+Unreleased
+----------
+- CIF 読み込み時に `_space_group_symop_operation_xyz` / `_symmetry_equiv_pos_as_xyz` の対称操作を展開し、代表点だけでなく単位胞内の原子を描画するように修正。
+- CIF のインラインコメントを quote-aware に無視し、セル値や対称操作行の末尾コメントで読み込みが崩れないように修正。
+- VASP/POSCAR 保存で Direct / Cartesian を選択できるように変更。
+- 通常 XYZ 保存で Cartesian / 分率座標を選択できるように変更。extended XYZ は ASE 互換の Cartesian `pos` を維持。
+- Windows で2回目以降の起動に渡したファイルパスを既存ウィンドウへ送れるように修正。
+- Windows 起動時に Qt plugin path を実行ファイル周辺へ固定し、`no Qt platform plugin could be initialized` ダイアログが繰り返し出ないように修正。
+- README / Guide / QUICKSTART を CIF 対称性展開と保存座標形式に合わせて更新。
+
 Version 1.1.1 - Single-instance tabs and atom-pair bond editing
 ---------------------------------------------------------------
 - アプリを単一起動に制限し、2回目以降の起動では新しいウィンドウを作らず既存ウィンドウを前面へ戻すように変更。

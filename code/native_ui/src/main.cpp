@@ -1,5 +1,6 @@
 #include <QApplication>
 #include <QDir>
+#include <QFile>
 #include <QFileInfo>
 #include <QIcon>
 #include <QIODevice>
@@ -18,20 +19,52 @@
 
 #include "MainWindow.h"
 
-int main(int argc, char* argv[]) {
-#ifdef Q_OS_WIN
-    HANDLE singleInstanceMutex = CreateMutexW(nullptr, TRUE, L"Local\\ASEappSurfaceBuilder.SingleInstance.Mutex");
-    if (singleInstanceMutex != nullptr && GetLastError() == ERROR_ALREADY_EXISTS) {
-        if (HWND existingWindow = FindWindowW(nullptr, L"ASEapp Surface Builder")) {
-            ShowWindow(existingWindow, SW_RESTORE);
-            SetForegroundWindow(existingWindow);
+namespace {
+QString configureQtPluginPath(int argc, char* argv[]) {
+    QString executableDir;
+    if (argc > 0 && argv != nullptr && argv[0] != nullptr) {
+        QFileInfo executableInfo(QString::fromLocal8Bit(argv[0]));
+        if (executableInfo.isRelative()) {
+            executableInfo = QFileInfo(QDir::current(), executableInfo.filePath());
         }
-        CloseHandle(singleInstanceMutex);
-        return 0;
+        executableDir = executableInfo.absolutePath();
+    }
+
+    QStringList candidateRoots;
+    if (!executableDir.isEmpty()) {
+        const QDir dir(executableDir);
+        candidateRoots << dir.filePath(QStringLiteral("plugins"));
+        candidateRoots << dir.filePath(QStringLiteral("../plugins"));
+    }
+#ifdef Q_OS_WIN
+    const QString condaPrefix = qEnvironmentVariable("CONDA_PREFIX");
+    if (!condaPrefix.isEmpty()) {
+        candidateRoots << QDir(condaPrefix).filePath(QStringLiteral("Library/lib/qt6/plugins"));
     }
 #endif
 
+    for (const QString& root : candidateRoots) {
+        const QDir pluginDir(root);
+        const QString platformDll = pluginDir.filePath(QStringLiteral("platforms/qwindows.dll"));
+        if (!QFileInfo::exists(platformDll)) {
+            continue;
+        }
+        const QString canonicalRoot = QFileInfo(root).absoluteFilePath();
+        const QString platformRoot = QDir(canonicalRoot).filePath(QStringLiteral("platforms"));
+        qputenv("QT_PLUGIN_PATH", QFile::encodeName(QDir::toNativeSeparators(canonicalRoot)));
+        qputenv("QT_QPA_PLATFORM_PLUGIN_PATH", QFile::encodeName(QDir::toNativeSeparators(platformRoot)));
+        return canonicalRoot;
+    }
+    return {};
+}
+}  // namespace
+
+int main(int argc, char* argv[]) {
+    const QString qtPluginPath = configureQtPluginPath(argc, argv);
     QApplication app(argc, argv);
+    if (!qtPluginPath.isEmpty()) {
+        QCoreApplication::addLibraryPath(qtPluginPath);
+    }
     app.setOrganizationName("ASEapp");
     app.setApplicationName("ASEapp Surface Builder");
     app.setWindowIcon(QIcon(":/icons/aseapp_surface_builder_icon.png"));
@@ -60,6 +93,18 @@ int main(int argc, char* argv[]) {
         existingInstance.waitForBytesWritten(1000);
         return true;
     };
+#ifdef Q_OS_WIN
+    HANDLE singleInstanceMutex = CreateMutexW(nullptr, TRUE, L"Local\\ASEappSurfaceBuilder.SingleInstance.Mutex");
+    if (singleInstanceMutex != nullptr && GetLastError() == ERROR_ALREADY_EXISTS) {
+        sendToExistingInstance();
+        if (HWND existingWindow = FindWindowW(nullptr, L"ASEapp Surface Builder")) {
+            ShowWindow(existingWindow, SW_RESTORE);
+            SetForegroundWindow(existingWindow);
+        }
+        CloseHandle(singleInstanceMutex);
+        return 0;
+    }
+#endif
 #ifndef Q_OS_WIN
     const QString lockDir = QStandardPaths::writableLocation(QStandardPaths::TempLocation);
     QLockFile singleInstanceLock(QDir(lockDir).filePath(QStringLiteral("ASEappSurfaceBuilder.lock")));

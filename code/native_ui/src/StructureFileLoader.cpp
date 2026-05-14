@@ -93,6 +93,252 @@ QVector3D toCartesian(const std::array<QVector3D, 3>& cell, const QVector3D& fra
     return cell[0] * frac.x() + cell[1] * frac.y() + cell[2] * frac.z();
 }
 
+struct CifSymmetryExpression {
+    std::array<double, 3> coefficients{0.0, 0.0, 0.0};
+    double offset = 0.0;
+};
+
+struct CifSymmetryOperation {
+    std::array<CifSymmetryExpression, 3> expressions;
+};
+
+double parseCifLinearNumber(QString token, bool* ok) {
+    token = token.trimmed();
+    token.remove(QRegularExpression(QStringLiteral("\\([^\\)]*\\)$")));
+    if (token.isEmpty()) {
+        if (ok != nullptr) {
+            *ok = false;
+        }
+        return 0.0;
+    }
+
+    const int slashIndex = token.indexOf(QLatin1Char('/'));
+    if (slashIndex > 0) {
+        bool numeratorOk = false;
+        bool denominatorOk = false;
+        const double numerator = token.left(slashIndex).toDouble(&numeratorOk);
+        const double denominator = token.mid(slashIndex + 1).toDouble(&denominatorOk);
+        const bool valid = numeratorOk && denominatorOk && std::abs(denominator) > 1.0e-12;
+        if (ok != nullptr) {
+            *ok = valid;
+        }
+        return valid ? numerator / denominator : 0.0;
+    }
+
+    bool localOk = false;
+    const double value = token.toDouble(&localOk);
+    if (ok != nullptr) {
+        *ok = localOk;
+    }
+    return localOk ? value : 0.0;
+}
+
+std::optional<CifSymmetryExpression> parseCifSymmetryExpression(QString expression) {
+    expression = expression.trimmed().toLower();
+    expression.replace(QChar(0x2212), QLatin1Char('-'));
+    expression.remove(QRegularExpression(QStringLiteral("\\s+")));
+    if (expression.isEmpty()) {
+        return std::nullopt;
+    }
+    if (!expression.startsWith(QLatin1Char('+')) && !expression.startsWith(QLatin1Char('-'))) {
+        expression.prepend(QLatin1Char('+'));
+    }
+
+    CifSymmetryExpression parsed;
+    int position = 0;
+    while (position < expression.size()) {
+        const QChar signChar = expression.at(position);
+        if (signChar != QLatin1Char('+') && signChar != QLatin1Char('-')) {
+            return std::nullopt;
+        }
+        const double sign = signChar == QLatin1Char('-') ? -1.0 : 1.0;
+        ++position;
+        const int termStart = position;
+        while (position < expression.size()
+               && expression.at(position) != QLatin1Char('+')
+               && expression.at(position) != QLatin1Char('-')) {
+            ++position;
+        }
+        QString term = expression.mid(termStart, position - termStart).trimmed();
+        if (term.isEmpty()) {
+            continue;
+        }
+
+        int variableIndex = -1;
+        int variablePosition = -1;
+        for (int axis = 0; axis < 3; ++axis) {
+            const QChar variable = QStringLiteral("xyz").at(axis);
+            const int found = term.indexOf(variable);
+            if (found >= 0) {
+                if (variableIndex >= 0) {
+                    return std::nullopt;
+                }
+                variableIndex = axis;
+                variablePosition = found;
+            }
+        }
+
+        if (variableIndex >= 0) {
+            QString prefix = term.left(variablePosition).trimmed();
+            QString suffix = term.mid(variablePosition + 1).trimmed();
+            if (prefix.endsWith(QLatin1Char('*'))) {
+                prefix.chop(1);
+            }
+            double coefficient = 1.0;
+            if (!prefix.isEmpty()) {
+                bool coefficientOk = false;
+                coefficient = parseCifLinearNumber(prefix, &coefficientOk);
+                if (!coefficientOk) {
+                    return std::nullopt;
+                }
+            }
+            if (!suffix.isEmpty()) {
+                if (suffix.startsWith(QLatin1Char('*'))) {
+                    suffix.remove(0, 1);
+                    bool multiplierOk = false;
+                    const double multiplier = parseCifLinearNumber(suffix, &multiplierOk);
+                    if (!multiplierOk) {
+                        return std::nullopt;
+                    }
+                    coefficient *= multiplier;
+                } else if (suffix.startsWith(QLatin1Char('/'))) {
+                    suffix.remove(0, 1);
+                    bool divisorOk = false;
+                    const double divisor = parseCifLinearNumber(suffix, &divisorOk);
+                    if (!divisorOk || std::abs(divisor) < 1.0e-12) {
+                        return std::nullopt;
+                    }
+                    coefficient /= divisor;
+                } else {
+                    return std::nullopt;
+                }
+            }
+            parsed.coefficients[static_cast<std::size_t>(variableIndex)] += sign * coefficient;
+        } else {
+            bool offsetOk = false;
+            const double offset = parseCifLinearNumber(term, &offsetOk);
+            if (!offsetOk) {
+                return std::nullopt;
+            }
+            parsed.offset += sign * offset;
+        }
+    }
+    return parsed;
+}
+
+std::optional<CifSymmetryOperation> parseCifSymmetryOperation(QString operation) {
+    operation = operation.trimmed();
+    if ((operation.startsWith('\'') && operation.endsWith('\'')) || (operation.startsWith('"') && operation.endsWith('"'))) {
+        operation = operation.mid(1, operation.size() - 2);
+    }
+
+    const QStringList pieces = operation.split(QLatin1Char(','), Qt::KeepEmptyParts);
+    if (pieces.size() != 3) {
+        return std::nullopt;
+    }
+
+    CifSymmetryOperation parsed;
+    for (int axis = 0; axis < 3; ++axis) {
+        const auto expression = parseCifSymmetryExpression(pieces.at(axis));
+        if (!expression.has_value()) {
+            return std::nullopt;
+        }
+        parsed.expressions[static_cast<std::size_t>(axis)] = *expression;
+    }
+    return parsed;
+}
+
+double wrapFractionalComponent(double value) {
+    value = value - std::floor(value);
+    if (value < 0.0) {
+        value += 1.0;
+    }
+    if (std::abs(value) < 1.0e-7 || std::abs(value - 1.0) < 1.0e-7) {
+        return 0.0;
+    }
+    return value;
+}
+
+QVector3D applyCifSymmetryOperation(const CifSymmetryOperation& operation, const QVector3D& fractional) {
+    const std::array<double, 3> source{
+        static_cast<double>(fractional.x()),
+        static_cast<double>(fractional.y()),
+        static_cast<double>(fractional.z())
+    };
+    std::array<double, 3> transformed{};
+    for (int axis = 0; axis < 3; ++axis) {
+        const CifSymmetryExpression& expression = operation.expressions[static_cast<std::size_t>(axis)];
+        double value = expression.offset;
+        for (int component = 0; component < 3; ++component) {
+            value += expression.coefficients[static_cast<std::size_t>(component)] * source[static_cast<std::size_t>(component)];
+        }
+        transformed[static_cast<std::size_t>(axis)] = wrapFractionalComponent(value);
+    }
+    return QVector3D(
+        static_cast<float>(transformed[0]),
+        static_cast<float>(transformed[1]),
+        static_cast<float>(transformed[2]));
+}
+
+bool sameFractionalSite(const QVector3D& lhs, const QVector3D& rhs, double tolerance = 1.0e-4) {
+    auto componentDistance = [](double a, double b) {
+        const double direct = std::abs(a - b);
+        return std::min(direct, std::abs(1.0 - direct));
+    };
+    return componentDistance(lhs.x(), rhs.x()) <= tolerance
+        && componentDistance(lhs.y(), rhs.y()) <= tolerance
+        && componentDistance(lhs.z(), rhs.z()) <= tolerance;
+}
+
+bool containsEquivalentFractionalAtom(const std::vector<NativeAtom>& atoms, const QString& element, const QVector3D& fractional) {
+    const QString normalizedElement = normalizeElement(element);
+    return std::any_of(atoms.begin(), atoms.end(), [&](const NativeAtom& atom) {
+        return normalizeElement(atom.element) == normalizedElement
+            && sameFractionalSite(atom.fractional, fractional);
+    });
+}
+
+std::vector<NativeAtom> expandAtomsByCifSymmetry(const std::vector<NativeAtom>& asymmetricAtoms,
+                                                 const std::array<QVector3D, 3>& cell,
+                                                 const QStringList& operationTexts) {
+    std::vector<CifSymmetryOperation> operations;
+    operations.reserve(static_cast<std::size_t>(operationTexts.size()));
+    for (const QString& operationText : operationTexts) {
+        const auto operation = parseCifSymmetryOperation(operationText);
+        if (operation.has_value()) {
+            operations.push_back(*operation);
+        }
+    }
+    if (operations.empty()) {
+        return asymmetricAtoms;
+    }
+
+    std::vector<NativeAtom> expandedAtoms;
+    expandedAtoms.reserve(asymmetricAtoms.size() * operations.size());
+    for (const NativeAtom& sourceAtom : asymmetricAtoms) {
+        const QString baseTag = sourceAtom.tag.trimmed().isEmpty()
+            ? normalizeElement(sourceAtom.element)
+            : sourceAtom.tag.trimmed();
+        int generatedForThisSite = 0;
+        for (const CifSymmetryOperation& operation : operations) {
+            const QVector3D fractional = applyCifSymmetryOperation(operation, sourceAtom.fractional);
+            if (containsEquivalentFractionalAtom(expandedAtoms, sourceAtom.element, fractional)) {
+                continue;
+            }
+            NativeAtom atom = sourceAtom;
+            atom.atomId = static_cast<int>(expandedAtoms.size()) + 1;
+            atom.fractional = fractional;
+            atom.cartesian = toCartesian(cell, fractional);
+            atom.tag = generatedForThisSite == 0
+                ? baseTag
+                : QStringLiteral("%1_sym%2").arg(baseTag).arg(generatedForThisSite + 1, 2, 10, QChar('0'));
+            expandedAtoms.push_back(atom);
+            ++generatedForThisSite;
+        }
+    }
+    return expandedAtoms.empty() ? asymmetricAtoms : expandedAtoms;
+}
+
 std::array<QVector3D, 3> buildCell(double a, double b, double c, double alphaDeg, double betaDeg, double gammaDeg) {
     const double alpha = qDegreesToRadians(alphaDeg);
     const double beta = qDegreesToRadians(betaDeg);
@@ -199,6 +445,27 @@ QStringList tokenizeRespectingQuotes(const QString& line) {
         tokens.push_back(current);
     }
     return tokens;
+}
+
+QString stripCifInlineComment(const QString& line) {
+    QChar quote;
+    for (int i = 0; i < line.size(); ++i) {
+        const QChar ch = line.at(i);
+        if (!quote.isNull()) {
+            if (ch == quote) {
+                quote = QChar();
+            }
+            continue;
+        }
+        if (ch == '\'' || ch == '"') {
+            quote = ch;
+            continue;
+        }
+        if (ch == '#') {
+            return line.left(i);
+        }
+    }
+    return line;
 }
 
 struct ExtXyzPropertyLayout {
@@ -397,6 +664,8 @@ std::optional<StructureData> loadCif(const QString& path, QString* errorMessage)
     data.title = QFileInfo(path).baseName();
 
     double a = 0.0, b = 0.0, c = 0.0, alpha = 90.0, beta = 90.0, gamma = 90.0;
+    QStringList symmetryOperations;
+    bool sawFractionalAtomSites = false;
 
     auto unquote = [](QString value) {
         value = value.trimmed();
@@ -405,9 +674,13 @@ std::optional<StructureData> loadCif(const QString& path, QString* errorMessage)
         }
         return value;
     };
+    auto itemValue = [&](const QString& line) {
+        const auto tokens = tokenizeRespectingQuotes(line);
+        return tokens.size() >= 2 ? unquote(tokens.at(1)) : QString();
+    };
 
     for (int i = 0; i < rawLines.size(); ++i) {
-        const QString trimmed = rawLines.at(i).trimmed();
+        const QString trimmed = stripCifInlineComment(rawLines.at(i)).trimmed();
         if (trimmed.isEmpty() || trimmed.startsWith('#')) {
             continue;
         }
@@ -415,12 +688,12 @@ std::optional<StructureData> loadCif(const QString& path, QString* errorMessage)
             data.title = trimmed.mid(5).trimmed();
             continue;
         }
-        if (trimmed.startsWith("_cell_length_a")) { a = parseNumber(trimmed.section(' ', -1)); continue; }
-        if (trimmed.startsWith("_cell_length_b")) { b = parseNumber(trimmed.section(' ', -1)); continue; }
-        if (trimmed.startsWith("_cell_length_c")) { c = parseNumber(trimmed.section(' ', -1)); continue; }
-        if (trimmed.startsWith("_cell_angle_alpha")) { alpha = parseNumber(trimmed.section(' ', -1), 90.0); continue; }
-        if (trimmed.startsWith("_cell_angle_beta")) { beta = parseNumber(trimmed.section(' ', -1), 90.0); continue; }
-        if (trimmed.startsWith("_cell_angle_gamma")) { gamma = parseNumber(trimmed.section(' ', -1), 90.0); continue; }
+        if (trimmed.startsWith("_cell_length_a")) { a = parseNumber(itemValue(trimmed)); continue; }
+        if (trimmed.startsWith("_cell_length_b")) { b = parseNumber(itemValue(trimmed)); continue; }
+        if (trimmed.startsWith("_cell_length_c")) { c = parseNumber(itemValue(trimmed)); continue; }
+        if (trimmed.startsWith("_cell_angle_alpha")) { alpha = parseNumber(itemValue(trimmed), 90.0); continue; }
+        if (trimmed.startsWith("_cell_angle_beta")) { beta = parseNumber(itemValue(trimmed), 90.0); continue; }
+        if (trimmed.startsWith("_cell_angle_gamma")) { gamma = parseNumber(itemValue(trimmed), 90.0); continue; }
 
         if (!trimmed.startsWith("loop_")) {
             continue;
@@ -429,7 +702,7 @@ std::optional<StructureData> loadCif(const QString& path, QString* errorMessage)
         QStringList headers;
         int j = i + 1;
         while (j < rawLines.size()) {
-            const QString headerLine = rawLines.at(j).trimmed();
+            const QString headerLine = stripCifInlineComment(rawLines.at(j)).trimmed();
             if (headerLine.startsWith('_')) {
                 headers.push_back(headerLine);
                 ++j;
@@ -450,10 +723,13 @@ std::optional<StructureData> loadCif(const QString& path, QString* errorMessage)
         const int cxIndex = headers.indexOf(QRegularExpression(QStringLiteral("_atom_site_Cartn_x")));
         const int cyIndex = headers.indexOf(QRegularExpression(QStringLiteral("_atom_site_Cartn_y")));
         const int czIndex = headers.indexOf(QRegularExpression(QStringLiteral("_atom_site_Cartn_z")));
+        const int symopIndex = headers.indexOf(QRegularExpression(
+            QStringLiteral("^(_space_group_symop_operation_xyz|_symmetry_equiv_pos_as_xyz)$"),
+            QRegularExpression::CaseInsensitiveOption));
 
         QStringList buffer;
         for (; j < rawLines.size(); ++j) {
-            const QString rowLine = rawLines.at(j).trimmed();
+            const QString rowLine = stripCifInlineComment(rawLines.at(j)).trimmed();
             if (rowLine.isEmpty()) {
                 continue;
             }
@@ -467,12 +743,20 @@ std::optional<StructureData> loadCif(const QString& path, QString* errorMessage)
             while (buffer.size() >= headers.size()) {
                 const auto row = buffer.mid(0, headers.size());
                 buffer = buffer.mid(headers.size());
+                if (symopIndex >= 0) {
+                    const QString operation = row.value(symopIndex).trimmed();
+                    if (!operation.isEmpty() && operation != QStringLiteral("?") && operation != QStringLiteral(".")) {
+                        symmetryOperations.push_back(operation);
+                    }
+                    continue;
+                }
                 if ((fxIndex >= 0 && fyIndex >= 0 && fzIndex >= 0) || (cxIndex >= 0 && cyIndex >= 0 && czIndex >= 0)) {
                     NativeAtom atom;
                     atom.atomId = static_cast<int>(data.atoms.size()) + 1;
                     atom.element = symbolIndex >= 0 ? row.value(symbolIndex) : row.value(labelIndex);
                     atom.tag = labelIndex >= 0 ? row.value(labelIndex) : QString();
                     if (fxIndex >= 0 && fyIndex >= 0 && fzIndex >= 0) {
+                        sawFractionalAtomSites = true;
                         atom.fractional = QVector3D(
                             static_cast<float>(parseNumber(row.value(fxIndex))),
                             static_cast<float>(parseNumber(row.value(fyIndex))),
@@ -497,6 +781,9 @@ std::optional<StructureData> loadCif(const QString& path, QString* errorMessage)
     if (data.atoms.empty()) {
         if (errorMessage) *errorMessage = QStringLiteral("No atom sites found in CIF.");
         return std::nullopt;
+    }
+    if (sawFractionalAtomSites && !symmetryOperations.isEmpty() && hasCell(data.cellVectors)) {
+        data.atoms = expandAtomsByCifSymmetry(data.atoms, data.cellVectors, symmetryOperations);
     }
     finalizeAtoms(data);
     return data;

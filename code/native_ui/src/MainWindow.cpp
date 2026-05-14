@@ -710,7 +710,41 @@ bool isPoscarPath(const QString& path) {
         || suffix == QStringLiteral("contcar");
 }
 
-bool writePoscarFile(const StructureData& structure, const QString& path, QString* errorMessage) {
+enum class CoordinateOutputMode {
+    Direct,
+    Cartesian
+};
+
+CoordinateOutputMode askCoordinateOutputMode(QWidget* parent, bool japanese, bool vaspFormat, bool* accepted) {
+    const QString directLabel = japanese ? QStringLiteral("Direct / 分率座標") : QStringLiteral("Direct / fractional");
+    const QString cartesianLabel = japanese ? QStringLiteral("Cartesian / Å") : QStringLiteral("Cartesian / Å");
+    const QStringList choices = vaspFormat
+        ? QStringList{directLabel, cartesianLabel}
+        : QStringList{cartesianLabel, directLabel};
+    bool ok = false;
+    const QString selected = QInputDialog::getItem(
+        parent,
+        japanese ? QStringLiteral("座標形式を選択") : QStringLiteral("Select coordinate mode"),
+        vaspFormat
+            ? (japanese ? QStringLiteral("VASP/POSCAR に書き出す座標形式:") : QStringLiteral("Coordinate mode for VASP/POSCAR export:"))
+            : (japanese ? QStringLiteral("通常 XYZ に書き出す座標形式:") : QStringLiteral("Coordinate mode for plain XYZ export:")),
+        choices,
+        0,
+        false,
+        &ok);
+    if (accepted != nullptr) {
+        *accepted = ok;
+    }
+    if (!ok) {
+        return vaspFormat ? CoordinateOutputMode::Direct : CoordinateOutputMode::Cartesian;
+    }
+    return selected == cartesianLabel ? CoordinateOutputMode::Cartesian : CoordinateOutputMode::Direct;
+}
+
+bool writePoscarFile(const StructureData& structure,
+                     const QString& path,
+                     CoordinateOutputMode coordinateMode,
+                     QString* errorMessage) {
     QFile file(path);
     if (!file.open(QIODevice::WriteOnly | QIODevice::Truncate | QIODevice::Text)) {
         if (errorMessage != nullptr) {
@@ -750,16 +784,19 @@ bool writePoscarFile(const StructureData& structure, const QString& path, QStrin
     if (hasSelectiveFlags) {
         out << "Selective dynamics\n";
     }
-    out << "Direct\n";
+    out << (coordinateMode == CoordinateOutputMode::Cartesian ? "Cartesian\n" : "Direct\n");
     for (const auto& element : elements) {
         for (const auto& atom : structure.atoms) {
             if (atom.element != element) {
                 continue;
             }
+            const QVector3D coordinates = coordinateMode == CoordinateOutputMode::Cartesian
+                ? atom.cartesian
+                : atom.fractional;
             out << QStringLiteral("  %1  %2  %3")
-                .arg(atom.fractional.x(), 16, 'f', 10)
-                .arg(atom.fractional.y(), 16, 'f', 10)
-                .arg(atom.fractional.z(), 16, 'f', 10);
+                .arg(coordinates.x(), 16, 'f', 10)
+                .arg(coordinates.y(), 16, 'f', 10)
+                .arg(coordinates.z(), 16, 'f', 10);
             if (hasSelectiveFlags) {
                 out << QStringLiteral("  %1  %2  %3")
                     .arg(atom.movable[0] ? "T" : "F")
@@ -790,7 +827,11 @@ QString xyzElement(const NativeAtom& atom) {
     return element.isEmpty() ? QStringLiteral("X") : element;
 }
 
-bool writeXyzFile(const StructureData& structure, const QString& path, bool extended, QString* errorMessage) {
+bool writeXyzFile(const StructureData& structure,
+                  const QString& path,
+                  bool extended,
+                  QString* errorMessage,
+                  CoordinateOutputMode coordinateMode = CoordinateOutputMode::Cartesian) {
     QFile file(path);
     if (!file.open(QIODevice::WriteOnly | QIODevice::Truncate | QIODevice::Text)) {
         if (errorMessage != nullptr) {
@@ -816,13 +857,19 @@ bool writeXyzFile(const StructureData& structure, const QString& path, bool exte
             << "pbc=\"T T T\" "
             << "Title=\"" << extXyzEscaped(structure.title.isEmpty() ? QStringLiteral("ASEapp Surface Builder") : structure.title) << "\"\n";
     } else {
-        out << (structure.title.isEmpty() ? QStringLiteral("ASEapp Surface Builder XYZ") : structure.title) << '\n';
+        out << (structure.title.isEmpty() ? QStringLiteral("ASEapp Surface Builder XYZ") : structure.title);
+        if (coordinateMode == CoordinateOutputMode::Direct) {
+            out << " coordinate_mode=fractional/direct";
+        }
+        out << '\n';
     }
     for (const auto& atom : structure.atoms) {
+        const bool writeFractional = !extended && coordinateMode == CoordinateOutputMode::Direct;
+        const QVector3D coordinates = writeFractional ? atom.fractional : atom.cartesian;
         out << xyzElement(atom) << ' '
-            << atom.cartesian.x() << ' '
-            << atom.cartesian.y() << ' '
-            << atom.cartesian.z();
+            << coordinates.x() << ' '
+            << coordinates.y() << ' '
+            << coordinates.z();
         if (extended) {
             const QString safeTag = atom.tag.trimmed().isEmpty()
                 ? QStringLiteral("%1-%2").arg(xyzElement(atom)).arg(atom.atomId)
@@ -3272,11 +3319,28 @@ void MainWindow::showAboutDialog() {
 
 void MainWindow::saveStructureAs() {
     QString selectedFilter;
-    const QString path = QFileDialog::getSaveFileName(this, "Save structure", defaultOpenDirectory() + "/" +
+    QString path = QFileDialog::getSaveFileName(this, "Save structure", defaultOpenDirectory() + "/" +
         (m_structure.title.isEmpty() ? "surface_model.aseproj" : m_structure.title + ".aseproj"),
         "ASEapp project (*.aseproj *.json);;Extended XYZ for ASE (*.extxyz *.xyz);;Plain XYZ coordinates only (*.xyz);;VASP POSCAR (*.vasp POSCAR CONTCAR *.poscar)",
         &selectedFilter);
     if (path.isEmpty()) return;
+
+    const bool selectedProject = selectedFilter.contains(QStringLiteral("ASEapp project"), Qt::CaseInsensitive);
+    const bool selectedExtXyz = selectedFilter.contains(QStringLiteral("Extended XYZ"), Qt::CaseInsensitive);
+    const bool selectedPlainXyz = selectedFilter.contains(QStringLiteral("Plain XYZ"), Qt::CaseInsensitive);
+    const bool selectedVasp = selectedFilter.contains(QStringLiteral("VASP POSCAR"), Qt::CaseInsensitive);
+    const bool hasSuffix = !QFileInfo(path).suffix().isEmpty();
+    if (!hasSuffix) {
+        if (selectedVasp && !isPoscarPath(path)) {
+            path += QStringLiteral(".vasp");
+        } else if (selectedExtXyz) {
+            path += QStringLiteral(".extxyz");
+        } else if (selectedPlainXyz) {
+            path += QStringLiteral(".xyz");
+        } else if (selectedProject) {
+            path += QStringLiteral(".aseproj");
+        }
+    }
 
     const QString diagnostics = structureDiagnosticsText(false);
     const auto saveReply = QMessageBox::question(
@@ -3289,9 +3353,17 @@ void MainWindow::saveStructureAs() {
         return;
     }
 
-    if (isPoscarPath(path)) {
+    const bool saveAsPoscar = selectedVasp || isPoscarPath(path);
+    const bool saveAsXyz = selectedExtXyz || selectedPlainXyz || isXyzPath(path);
+
+    if (saveAsPoscar) {
+        bool accepted = false;
+        const CoordinateOutputMode coordinateMode = askCoordinateOutputMode(this, m_japanese, true, &accepted);
+        if (!accepted) {
+            return;
+        }
         QString errorMessage;
-        if (!writePoscarFile(m_structure, path, &errorMessage)) {
+        if (!writePoscarFile(m_structure, path, coordinateMode, &errorMessage)) {
             QMessageBox::critical(this, "Save Structure", errorMessage);
             return;
         }
@@ -3302,10 +3374,11 @@ void MainWindow::saveStructureAs() {
         return;
     }
 
-    if (isXyzPath(path)) {
+    if (saveAsXyz) {
         QString errorMessage;
         const bool extended = QFileInfo(path).suffix().compare(QStringLiteral("extxyz"), Qt::CaseInsensitive) == 0
-            || selectedFilter.contains(QStringLiteral("Extended XYZ"), Qt::CaseInsensitive);
+            || selectedExtXyz;
+        CoordinateOutputMode coordinateMode = CoordinateOutputMode::Cartesian;
         if (!extended) {
             const auto reply = QMessageBox::warning(
                 this,
@@ -3318,8 +3391,13 @@ void MainWindow::saveStructureAs() {
             if (reply != QMessageBox::Yes) {
                 return;
             }
+            bool accepted = false;
+            coordinateMode = askCoordinateOutputMode(this, m_japanese, false, &accepted);
+            if (!accepted) {
+                return;
+            }
         }
-        if (!writeXyzFile(m_structure, path, extended, &errorMessage)) {
+        if (!writeXyzFile(m_structure, path, extended, &errorMessage, coordinateMode)) {
             QMessageBox::critical(this, "Save Structure", errorMessage);
             return;
         }
@@ -6126,6 +6204,86 @@ bool MainWindow::runAdsorbatePoseSelfTest(const QString& outputDirectory, QStrin
     }
     if (!require(closeVector(reloaded->atoms.back().cartesian, m_structure.atoms.back().cartesian, 1.0e-5), QStringLiteral("native extxyz reload preserves coordinates"))) {
         return fail(QStringLiteral("Reloaded extxyz coordinate mismatch."));
+    }
+
+    const QString cifSymmetryPath = outputDir.filePath(QStringLiteral("cif_symmetry_self_test.cif"));
+    {
+        QFile cifFile(cifSymmetryPath);
+        if (!cifFile.open(QIODevice::WriteOnly | QIODevice::Truncate | QIODevice::Text)) {
+            return fail(QStringLiteral("Failed to write CIF symmetry self-test input."));
+        }
+        QTextStream cifOut(&cifFile);
+        cifOut << "data_symmetry_self_test\n"
+               << "_cell_length_a 10 # inline comment must be ignored\n"
+               << "_cell_length_b 10\n"
+               << "_cell_length_c 10\n"
+               << "_cell_angle_alpha 90\n"
+               << "_cell_angle_beta 90\n"
+               << "_cell_angle_gamma 90\n"
+               << "loop_\n"
+               << "_space_group_symop_operation_xyz\n"
+               << "'x, y, z' # identity\n"
+               << "'-x, -y, -z'\n"
+               << "loop_\n"
+               << "_atom_site_label\n"
+               << "_atom_site_type_symbol\n"
+               << "_atom_site_fract_x\n"
+               << "_atom_site_fract_y\n"
+               << "_atom_site_fract_z\n"
+               << "Fe1 Fe 0.1 0.2 0.3 # asymmetric site\n";
+    }
+    artifacts << cifSymmetryPath;
+    loadError.clear();
+    const auto symmetryReloaded = loader.load(cifSymmetryPath, &loadError);
+    if (!symmetryReloaded.has_value()) {
+        return fail(loadError.isEmpty() ? QStringLiteral("Failed to load CIF symmetry self-test input.") : loadError);
+    }
+    auto hasFractionalPosition = [&](const StructureData& structure, const QVector3D& expected) {
+        return std::any_of(structure.atoms.begin(), structure.atoms.end(), [&](const NativeAtom& atom) {
+            return closeVector(atom.fractional, expected, 1.0e-5);
+        });
+    };
+    if (!require(symmetryReloaded->atoms.size() == 2, QStringLiteral("CIF loader expands symmetry-equivalent fractional atom sites"))) {
+        return fail(QStringLiteral("CIF symmetry expansion atom count mismatch."));
+    }
+    if (!require(hasFractionalPosition(*symmetryReloaded, QVector3D(0.1f, 0.2f, 0.3f))
+            && hasFractionalPosition(*symmetryReloaded, QVector3D(0.9f, 0.8f, 0.7f)),
+            QStringLiteral("CIF symmetry expansion preserves identity and wrapped inverted positions"))) {
+        return fail(QStringLiteral("CIF symmetry expansion coordinates mismatch."));
+    }
+
+    const QString directPoscarPath = outputDir.filePath(QStringLiteral("coordinate_mode_direct.vasp"));
+    writeError.clear();
+    if (!writePoscarFile(m_structure, directPoscarPath, CoordinateOutputMode::Direct, &writeError)) {
+        return fail(writeError);
+    }
+    artifacts << directPoscarPath;
+    const QString cartesianPoscarPath = outputDir.filePath(QStringLiteral("coordinate_mode_cartesian.vasp"));
+    writeError.clear();
+    if (!writePoscarFile(m_structure, cartesianPoscarPath, CoordinateOutputMode::Cartesian, &writeError)) {
+        return fail(writeError);
+    }
+    artifacts << cartesianPoscarPath;
+    const QString fractionalXyzPath = outputDir.filePath(QStringLiteral("coordinate_mode_fractional.xyz"));
+    writeError.clear();
+    if (!writeXyzFile(m_structure, fractionalXyzPath, false, &writeError, CoordinateOutputMode::Direct)) {
+        return fail(writeError);
+    }
+    artifacts << fractionalXyzPath;
+    if (!require(QFileInfo(directPoscarPath).exists() && QFileInfo(cartesianPoscarPath).exists() && QFileInfo(fractionalXyzPath).exists(),
+            QStringLiteral("VASP and XYZ coordinate-mode export files are written"))) {
+        return fail(QStringLiteral("Coordinate-mode export file was not created."));
+    }
+
+    const int tabCountBeforeLoad = static_cast<int>(m_documents.size());
+    if (!loadFromPath(cifSymmetryPath)) {
+        return fail(QStringLiteral("Failed to load a second structure into a new tab."));
+    }
+    if (!require(static_cast<int>(m_documents.size()) == tabCountBeforeLoad + 1
+            && m_activeDocumentIndex == tabCountBeforeLoad
+            && QFileInfo(m_structure.sourcePath).fileName() == QFileInfo(cifSymmetryPath).fileName(),
+            QStringLiteral("document tabs can keep multiple structures in one window"))) {
+        return fail(QStringLiteral("Second structure was not managed as a new tab."));
     }
 
     writeReport(true, QString());
