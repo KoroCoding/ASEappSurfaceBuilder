@@ -21,6 +21,7 @@ class StructureCanvas;
 class StructureFileLoader;
 class QDragEnterEvent;
 class QDropEvent;
+class QTabBar;
 
 class MainWindow : public QMainWindow {
     Q_OBJECT
@@ -54,6 +55,9 @@ private slots:
     void applySelectedPreset();
     void reloadPresetRegistry();
     void openPresetFile();
+    void newEmptyTab();
+    void closeCurrentTab();
+    void handleDocumentTabChanged(int index);
     void toggleAtomSelection(int atomId);
     void translateSelectedAtoms(const QVector3D& delta);
     void finishSelectedAtomTranslation();
@@ -113,9 +117,25 @@ private:
         double targetLength = 0.0;
     };
 
+    struct DocumentState {
+        EditSnapshot snapshot;
+        std::vector<PrecursorTemplate> loadedPrecursors;
+        std::vector<EditSnapshot> undoStack;
+        std::vector<EditSnapshot> redoStack;
+        bool translationUndoActive = false;
+    };
+
     void buildUi();
     void applyTheme();
     void applyStructureState(const StructureData& structure);
+    void initializeDefaultDocument();
+    DocumentState captureDocumentState() const;
+    void saveCurrentDocumentState();
+    void restoreDocumentState(int index);
+    void refreshDocumentTabs();
+    void updateCurrentDocumentTabTitle();
+    QString documentTabTitle(const StructureData& structure) const;
+    bool currentDocumentIsPristineDefault() const;
     void setCView(bool resetPan = true);
     QString uiText(const QString& key) const;
     SurfacePlacementRule currentPlacementRule() const;
@@ -154,6 +174,7 @@ private:
 
     StructureCanvas* m_canvas = nullptr;
     StructureFileLoader* m_loader = nullptr;
+    QTabBar* m_documentTabs = nullptr;
     SurfaceCustomizationRegistry m_customizationRegistry;
     StructureData m_structure;
     StructureData m_supercellBaseStructure;
@@ -178,6 +199,8 @@ private:
     QComboBox* m_posePreviewModeCombo = nullptr;
     QAction* m_openAction = nullptr;
     QAction* m_saveAction = nullptr;
+    QAction* m_newTabAction = nullptr;
+    QAction* m_closeTabAction = nullptr;
     QAction* m_exportLegendAction = nullptr;
     QAction* m_quickStartAction = nullptr;
     QAction* m_fitAction = nullptr;
@@ -240,6 +263,7 @@ private:
     std::vector<int> m_selectedAtomIds;
     QHash<QString, BondDistanceRange> m_customBondRanges;
     std::vector<PrecursorTemplate> m_loadedPrecursors;
+    std::vector<DocumentState> m_documents;
     std::vector<PoseGroup> m_poseGroups;
     std::vector<EditSnapshot> m_undoStack;
     std::vector<EditSnapshot> m_redoStack;
@@ -248,4 +272,6 @@ private:
     bool m_initialCViewAppliedAfterShow = false;
     bool m_moveAtomsMode = false;
     bool m_moveModelMode = false;
+    int m_activeDocumentIndex = -1;
+    bool m_restoringDocument = false;
 };

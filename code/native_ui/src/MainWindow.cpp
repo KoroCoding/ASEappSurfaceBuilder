@@ -65,6 +65,10 @@
 #include <QSizePolicy>
 #include <QSignalBlocker>
 #include <QStringConverter>
+#include <QHeaderView>
+#include <QTabBar>
+#include <QTableWidget>
+#include <QTableWidgetItem>
 #include <QTimer>
 #include <QVBoxLayout>
 #include <QStringList>
@@ -1533,6 +1537,248 @@ private:
     QLabel* m_statusLabel = nullptr;
 };
 
+struct AtomPairDistance {
+    int atomAId = -1;
+    int atomBId = -1;
+    QString atomALabel;
+    QString atomBLabel;
+    double distance = 0.0;
+    bool visibleBond = false;
+};
+
+struct AtomPairLengthEdit {
+    int atomAId = -1;
+    int atomBId = -1;
+    double targetLength = 0.0;
+};
+
+bool effectiveBondRangeForPairEditor(
+    const QHash<QString, BondDistanceRange>& customRanges,
+    const QString& elementA,
+    const QString& elementB,
+    BondDistanceRange* range)
+{
+    if (range == nullptr) {
+        return false;
+    }
+    const auto custom = customRanges.constFind(vestaBondKey(elementA, elementB));
+    if (custom != customRanges.cend()) {
+        *range = custom.value();
+        return range->maxDistance > 0.0 && range->maxDistance >= range->minDistance;
+    }
+    return vestaBondDistanceRange(elementA, elementB, range);
+}
+
+std::vector<AtomPairDistance> atomPairDistancesForStructure(
+    const StructureData& structure,
+    const QHash<QString, BondDistanceRange>& customRanges)
+{
+    std::vector<AtomPairDistance> pairs;
+    if (structure.atoms.size() < 2) {
+        return pairs;
+    }
+    if (structure.atoms.size() < 700) {
+        pairs.reserve(structure.atoms.size() * (structure.atoms.size() - 1) / 2);
+    }
+    for (std::size_t i = 0; i < structure.atoms.size(); ++i) {
+        const auto& atomA = structure.atoms[i];
+        for (std::size_t j = i + 1; j < structure.atoms.size(); ++j) {
+            const auto& atomB = structure.atoms[j];
+            const double distance = static_cast<double>((atomB.cartesian - atomA.cartesian).length());
+            BondDistanceRange range;
+            const bool hasRange = effectiveBondRangeForPairEditor(customRanges, atomA.element, atomB.element, &range);
+            const bool visible = hasRange
+                && distance >= range.minDistance - 1.0e-9
+                && distance <= range.maxDistance + 1.0e-9;
+            pairs.push_back(AtomPairDistance{
+                atomA.atomId,
+                atomB.atomId,
+                QStringLiteral("#%1 %2").arg(atomA.atomId).arg(atomA.element),
+                QStringLiteral("#%1 %2").arg(atomB.atomId).arg(atomB.element),
+                distance,
+                visible});
+        }
+    }
+    std::sort(pairs.begin(), pairs.end(), [](const AtomPairDistance& a, const AtomPairDistance& b) {
+        if (a.visibleBond != b.visibleBond) {
+            return a.visibleBond && !b.visibleBond;
+        }
+        if (std::abs(a.distance - b.distance) > 1.0e-9) {
+            return a.distance < b.distance;
+        }
+        if (a.atomAId != b.atomAId) {
+            return a.atomAId < b.atomAId;
+        }
+        return a.atomBId < b.atomBId;
+    });
+    return pairs;
+}
+
+NativeAtom* findMutableAtomById(StructureData& structure, int atomId) {
+    for (auto& atom : structure.atoms) {
+        if (atom.atomId == atomId) {
+            return &atom;
+        }
+    }
+    return nullptr;
+}
+
+bool adjustAtomPairBondLength(
+    StructureData& structure,
+    int atomAId,
+    int atomBId,
+    double targetLength,
+    QString* errorMessage)
+{
+    if (targetLength <= 0.0 || !std::isfinite(targetLength)) {
+        if (errorMessage != nullptr) {
+            *errorMessage = QStringLiteral("Target length must be positive.");
+        }
+        return false;
+    }
+    const NativeAtom* atomA = findMutableAtomById(structure, atomAId);
+    NativeAtom* atomB = findMutableAtomById(structure, atomBId);
+    if (atomA == nullptr || atomB == nullptr) {
+        if (errorMessage != nullptr) {
+            *errorMessage = QStringLiteral("Atom pair #%1-#%2 was not found.").arg(atomAId).arg(atomBId);
+        }
+        return false;
+    }
+    const QVector3D bond = atomB->cartesian - atomA->cartesian;
+    const double currentLength = static_cast<double>(bond.length());
+    if (currentLength <= 1.0e-8) {
+        if (errorMessage != nullptr) {
+            *errorMessage = QStringLiteral("Atom pair #%1-#%2 has zero length.").arg(atomAId).arg(atomBId);
+        }
+        return false;
+    }
+    const QVector3D direction = bond / static_cast<float>(currentLength);
+    atomB->cartesian = atomA->cartesian + direction * static_cast<float>(targetLength);
+    atomB->fractional = solveFractionalForCell(structure.cellVectors, atomB->cartesian);
+    structure.dirty = true;
+    return true;
+}
+
+class AtomPairLengthDialog final : public QDialog {
+public:
+    enum class ApplyMode {
+        None,
+        SelectedRows,
+        ChangedRows,
+    };
+
+    AtomPairLengthDialog(bool japanese, const std::vector<AtomPairDistance>& pairs, QWidget* parent = nullptr)
+        : QDialog(parent),
+          m_japanese(japanese),
+          m_pairs(pairs)
+    {
+        setWindowTitle(japanese ? QStringLiteral("原子対ボンド長一覧") : QStringLiteral("Atom-pair bond lengths"));
+        auto* layout = new QVBoxLayout(this);
+        auto* note = new QLabel(japanese
+            ? QStringLiteral("読み込まれている構造の全原子対を距離順に表示します。Target Å を変更し、選択行または変更済みを適用すると、Atom A を固定して Atom B を現在の結合方向へ移動します。")
+            : QStringLiteral("All atom pairs in the loaded structure are listed by distance. Edit Target Å, then apply selected or changed rows. Atom A stays fixed while Atom B moves along the current bond direction."),
+            this);
+        note->setWordWrap(true);
+        layout->addWidget(note);
+
+        m_table = new QTableWidget(static_cast<int>(m_pairs.size()), 6, this);
+        m_table->setHorizontalHeaderLabels({
+            japanese ? QStringLiteral("適用") : QStringLiteral("Apply"),
+            QStringLiteral("Atom A"),
+            QStringLiteral("Atom B"),
+            japanese ? QStringLiteral("表示ボンド") : QStringLiteral("Visible bond"),
+            QStringLiteral("Current Å"),
+            QStringLiteral("Target Å"),
+        });
+        m_table->setSelectionBehavior(QAbstractItemView::SelectRows);
+        m_table->setSelectionMode(QAbstractItemView::ExtendedSelection);
+        m_table->verticalHeader()->setVisible(false);
+        m_table->horizontalHeader()->setStretchLastSection(true);
+        for (int row = 0; row < static_cast<int>(m_pairs.size()); ++row) {
+            const AtomPairDistance& pair = m_pairs[static_cast<std::size_t>(row)];
+            auto* applyItem = new QTableWidgetItem();
+            applyItem->setFlags(Qt::ItemIsUserCheckable | Qt::ItemIsEnabled | Qt::ItemIsSelectable);
+            applyItem->setCheckState(Qt::Unchecked);
+            m_table->setItem(row, 0, applyItem);
+            setReadOnlyItem(row, 1, pair.atomALabel);
+            setReadOnlyItem(row, 2, pair.atomBLabel);
+            setReadOnlyItem(row, 3, pair.visibleBond
+                ? (japanese ? QStringLiteral("はい") : QStringLiteral("yes"))
+                : (japanese ? QStringLiteral("いいえ") : QStringLiteral("no")));
+            setReadOnlyItem(row, 4, QString::number(pair.distance, 'f', 4));
+            auto* targetItem = new QTableWidgetItem(QString::number(pair.distance, 'f', 4));
+            targetItem->setTextAlignment(Qt::AlignRight | Qt::AlignVCenter);
+            targetItem->setData(Qt::UserRole, pair.distance);
+            m_table->setItem(row, 5, targetItem);
+        }
+        m_table->resizeColumnsToContents();
+        layout->addWidget(m_table, 1);
+
+        auto* buttons = new QDialogButtonBox(QDialogButtonBox::Cancel, this);
+        auto* applySelected = buttons->addButton(
+            japanese ? QStringLiteral("選択行を適用") : QStringLiteral("Apply selected rows"),
+            QDialogButtonBox::AcceptRole);
+        auto* applyChanged = buttons->addButton(
+            japanese ? QStringLiteral("変更済みをすべて適用") : QStringLiteral("Apply all changed rows"),
+            QDialogButtonBox::AcceptRole);
+        connect(buttons, &QDialogButtonBox::clicked, this, [this, applySelected, applyChanged](QAbstractButton* button) {
+            if (button == applySelected) {
+                m_applyMode = ApplyMode::SelectedRows;
+                accept();
+            } else if (button == applyChanged) {
+                m_applyMode = ApplyMode::ChangedRows;
+                accept();
+            } else {
+                reject();
+            }
+        });
+        layout->addWidget(buttons);
+        resize(860, 620);
+    }
+
+    ApplyMode applyMode() const { return m_applyMode; }
+
+    std::vector<AtomPairLengthEdit> edits() const {
+        std::vector<AtomPairLengthEdit> out;
+        if (m_applyMode == ApplyMode::None || m_table == nullptr) {
+            return out;
+        }
+        for (int row = 0; row < m_table->rowCount(); ++row) {
+            bool ok = false;
+            const double target = m_table->item(row, 5)->text().trimmed().toDouble(&ok);
+            if (!ok || target <= 0.0 || !std::isfinite(target)) {
+                continue;
+            }
+            const double original = m_table->item(row, 5)->data(Qt::UserRole).toDouble();
+            const bool changed = std::abs(target - original) > 1.0e-6;
+            const bool checked = m_table->item(row, 0)->checkState() == Qt::Checked;
+            const bool selected = m_table->selectionModel() != nullptr
+                && m_table->selectionModel()->isRowSelected(row, QModelIndex());
+            if ((m_applyMode == ApplyMode::ChangedRows && changed)
+                || (m_applyMode == ApplyMode::SelectedRows && (checked || selected))) {
+                const AtomPairDistance& pair = m_pairs[static_cast<std::size_t>(row)];
+                out.push_back(AtomPairLengthEdit{pair.atomAId, pair.atomBId, target});
+            }
+        }
+        return out;
+    }
+
+private:
+    void setReadOnlyItem(int row, int column, const QString& text) {
+        auto* item = new QTableWidgetItem(text);
+        item->setFlags(Qt::ItemIsEnabled | Qt::ItemIsSelectable);
+        if (column >= 4) {
+            item->setTextAlignment(Qt::AlignRight | Qt::AlignVCenter);
+        }
+        m_table->setItem(row, column, item);
+    }
+
+    bool m_japanese = true;
+    std::vector<AtomPairDistance> m_pairs;
+    QTableWidget* m_table = nullptr;
+    ApplyMode m_applyMode = ApplyMode::None;
+};
+
 QString selectionText(const std::vector<int>& atomIds, bool japanese) {
     if (atomIds.empty()) return japanese ? QStringLiteral("選択原子: なし") : QStringLiteral("Selected atoms: none");
     QStringList items;
@@ -1673,7 +1919,7 @@ public:
             "6. Supercell で a/b/c 方向に拡張します。\n"
             "7. セル軸傾きで、c軸などをa/b方向へ傾けてステップテラス候補を作れます。\n"
             "8. 真空層 で真空層の追加・除去、またはスラブ全体の移動を行います。真空層除去ボタンでは c軸方向をすぐ詰められます。\n"
-            "9. ボンド距離設定で、元素ペアごとの表示ボンド距離 min/max Å を VESTA の SBOND 風に調整できます。\n"
+            "9. 原子対ボンド長で、読み込まれている構造の全原子対距離を一覧し、Target Å を個別に修正できます。\n"
             "10. 原子一覧PNG で、論文・学会用の球＋ラベル画像を解像度/DPI指定で出力します。\n\n"
             "視点操作:\n"
             "・初期視点: c 方向\n"
@@ -1695,7 +1941,7 @@ public:
             "6. Use Supercell to repeat along a/b/c.\n"
             "7. Use Axis tilt to tilt c or another cell axis toward a/b for step-terrace candidates.\n"
             "8. Use Vacuum to add/remove vacuum or move the whole slab. Remove vacuum immediately tightens the c-axis.\n"
-            "9. Use Bond distances to adjust per-element-pair visible bond min/max Å ranges in a VESTA SBOND-style workflow.\n"
+            "9. Use Atom-pair lengths to list every atom-pair distance in the loaded structure and edit each Target Å individually.\n"
             "10. Use Atom legend PNG to export a sphere-and-label image for papers or presentations with selectable resolution/DPI.\n\n"
             "View controls:\n"
             "・Initial view: c-axis\n"
@@ -1750,7 +1996,7 @@ public:
             "<li>真空層 で真空層の追加・除去、スラブ全体移動を行います。真空層除去ボタンでは c軸方向をすぐ詰められます。</li>"
             "</ul>"
             "<b>4. 発表用出力</b><ul>"
-            "<li>ボンド距離設定で、元素ペアごとの表示ボンド距離 min/max Å を設定できます。選択中の 2 原子距離を最大値として使うこともできます。</li>"
+            "<li>原子対ボンド長で、読み込まれている構造の各原子対距離を一覧し、Target Å を指定して個別に修正できます。</li>"
             "<li>原子一覧PNG で、現在の構造に含まれる元素を球＋ラベルの画像として出力します。横解像度、DPI、列数、白/透明背景を選べます。</li>"
             "</ul>"
             "<b>5. 視点操作</b><ul>"
@@ -1783,7 +2029,7 @@ public:
             "<li>Use Vacuum to add/remove vacuum or translate the whole slab. Remove vacuum immediately tightens the c-axis.</li>"
             "</ul>"
             "<b>4. Presentation output</b><ul>"
-            "<li>Use Bond distances to set visible bond min/max Å ranges per element pair. The current selected two-atom distance can be used as the maximum.</li>"
+            "<li>Use Atom-pair lengths to list each atom-pair distance in the loaded structure and edit the Target Å value individually.</li>"
             "<li>Use Atom legend PNG to export the elements in the current structure as a sphere-and-label image. Width, DPI, columns, and white/transparent background are selectable.</li>"
             "</ul>"
             "<b>5. View controls</b><ul>"
@@ -1813,12 +2059,7 @@ MainWindow::MainWindow(QWidget* parent) : QMainWindow(parent) {
     buildUi();
     applyTheme();
     reloadPresetRegistry();
-    m_structure = makeDefaultStructure();
-    m_supercellBaseStructure = m_structure;
-    m_hasSupercellBaseStructure = true;
-    m_lastEditWasSupercell = false;
-    m_supercellFactors = {1, 1, 1};
-    applyStructureState(m_structure);
+    initializeDefaultDocument();
     setCView(true);
     QTimer::singleShot(0, this, [this]() { setCView(true); });
     QTimer::singleShot(100, this, [this]() { setCView(true); });
@@ -1882,8 +2123,8 @@ QString MainWindow::uiText(const QString& key) const {
         if (key == "selected_none") return QStringLiteral("選択原子: なし");
         if (key == "cell") return QStringLiteral("セル");
         if (key == "bonds") return QStringLiteral("ボンド");
-        if (key == "bond_distances") return QStringLiteral("ボンド距離設定");
-        if (key == "bond_distances_tip") return QStringLiteral("VESTA風に元素ペアごとのボンド表示距離 min/max Å を設定します。");
+        if (key == "bond_distances") return QStringLiteral("原子対ボンド長");
+        if (key == "bond_distances_tip") return QStringLiteral("読み込まれている構造の全原子対距離を一覧し、Target Å を指定して個別に修正します。");
         if (key == "axes") return QStringLiteral("軸");
         if (key == "labels") return QStringLiteral("ラベル");
         if (key == "perspective") return QStringLiteral("透視投影");
@@ -1970,8 +2211,8 @@ QString MainWindow::uiText(const QString& key) const {
         if (key == "selected_none") return QStringLiteral("Selected atoms: none");
         if (key == "cell") return QStringLiteral("Cell");
         if (key == "bonds") return QStringLiteral("Bonds");
-        if (key == "bond_distances") return QStringLiteral("Bond distances");
-        if (key == "bond_distances_tip") return QStringLiteral("Set VESTA-style min/max Å bond display ranges per element pair.");
+        if (key == "bond_distances") return QStringLiteral("Atom-pair lengths");
+        if (key == "bond_distances_tip") return QStringLiteral("List every atom-pair distance in the loaded structure and edit each Target Å individually.");
         if (key == "axes") return QStringLiteral("Axes");
         if (key == "labels") return QStringLiteral("Labels");
         if (key == "perspective") return QStringLiteral("Perspective");
@@ -2033,6 +2274,26 @@ void MainWindow::buildUi() {
     auto* mainLayout = new QVBoxLayout(central);
     mainLayout->setContentsMargins(8, 8, 8, 8);
     mainLayout->setSpacing(8);
+
+    m_documentTabs = new QTabBar(central);
+    m_documentTabs->setExpanding(false);
+    m_documentTabs->setTabsClosable(true);
+    m_documentTabs->setDocumentMode(true);
+    m_documentTabs->setElideMode(Qt::ElideMiddle);
+    m_documentTabs->setToolTip(m_japanese
+        ? QStringLiteral("複数の構造を1つのアプリ内で切り替えます。Open は新しいタブで開きます。")
+        : QStringLiteral("Switch multiple structures inside one app. Open creates a new tab."));
+    connect(m_documentTabs, &QTabBar::currentChanged, this, &MainWindow::handleDocumentTabChanged);
+    connect(m_documentTabs, &QTabBar::tabCloseRequested, this, [this](int index) {
+        if (index >= 0 && index < static_cast<int>(m_documents.size())) {
+            if (index != m_activeDocumentIndex && m_activeDocumentIndex >= 0) {
+                saveCurrentDocumentState();
+                restoreDocumentState(index);
+            }
+            closeCurrentTab();
+        }
+    });
+    mainLayout->addWidget(m_documentTabs);
 
     auto* splitter = new QSplitter(Qt::Horizontal, central);
     splitter->addWidget(m_canvas);
@@ -2513,9 +2774,19 @@ void MainWindow::buildUi() {
 
     m_openAction = new QAction(uiText(QStringLiteral("open")), this);
     m_openAction->setShortcut(QKeySequence::Open);
-    m_openAction->setToolTip("Open a structure file.");
+    m_openAction->setToolTip(m_japanese ? QStringLiteral("構造ファイルを新しいタブで開きます。") : QStringLiteral("Open a structure file in a new tab."));
     connect(m_openAction, &QAction::triggered, this, &MainWindow::openStructure);
     toolbar->addAction(m_openAction);
+    m_newTabAction = new QAction(m_japanese ? QStringLiteral("新規タブ") : QStringLiteral("New tab"), this);
+    m_newTabAction->setShortcut(QKeySequence("Ctrl+T"));
+    m_newTabAction->setToolTip(m_japanese ? QStringLiteral("空の構造タブを追加します。") : QStringLiteral("Add a blank structure tab."));
+    connect(m_newTabAction, &QAction::triggered, this, &MainWindow::newEmptyTab);
+    toolbar->addAction(m_newTabAction);
+    m_closeTabAction = new QAction(m_japanese ? QStringLiteral("タブを閉じる") : QStringLiteral("Close tab"), this);
+    m_closeTabAction->setShortcut(QKeySequence("Ctrl+W"));
+    m_closeTabAction->setToolTip(m_japanese ? QStringLiteral("現在の構造タブを閉じます。") : QStringLiteral("Close the current structure tab."));
+    connect(m_closeTabAction, &QAction::triggered, this, &MainWindow::closeCurrentTab);
+    toolbar->addAction(m_closeTabAction);
     m_saveAction = new QAction(uiText(QStringLiteral("save")), this);
     m_saveAction->setShortcut(QKeySequence("Ctrl+Shift+S"));
     m_saveAction->setToolTip("Save the current structure to a file.");
@@ -2688,6 +2959,192 @@ void MainWindow::applyTheme() {
     }
 }
 
+void MainWindow::initializeDefaultDocument() {
+    m_structure = makeDefaultStructure();
+    m_structure.dirty = false;
+    m_supercellBaseStructure = m_structure;
+    m_hasSupercellBaseStructure = true;
+    m_lastEditWasSupercell = false;
+    m_supercellFactors = {1, 1, 1};
+    m_selectedAtomIds.clear();
+    m_loadedPrecursors.clear();
+    m_poseGroups.clear();
+    m_undoStack.clear();
+    m_redoStack.clear();
+    m_translationUndoActive = false;
+    applyStructureState(m_structure);
+    m_documents.clear();
+    m_activeDocumentIndex = 0;
+    m_documents.push_back(captureDocumentState());
+    refreshDocumentTabs();
+}
+
+MainWindow::DocumentState MainWindow::captureDocumentState() const {
+    DocumentState state;
+    state.snapshot = captureEditSnapshot();
+    state.loadedPrecursors = m_loadedPrecursors;
+    state.undoStack = m_undoStack;
+    state.redoStack = m_redoStack;
+    state.translationUndoActive = m_translationUndoActive;
+    return state;
+}
+
+QString MainWindow::documentTabTitle(const StructureData& structure) const {
+    QString title;
+    if (!structure.sourcePath.trimmed().isEmpty()) {
+        title = QFileInfo(structure.sourcePath).fileName();
+    }
+    if (title.trimmed().isEmpty()) {
+        title = structure.title.trimmed().isEmpty()
+            ? (m_japanese ? QStringLiteral("未保存の構造") : QStringLiteral("Untitled structure"))
+            : structure.title.trimmed();
+    }
+    if (title.size() > 36) {
+        title = title.left(16) + QStringLiteral("…") + title.right(16);
+    }
+    if (structure.dirty) {
+        title += QStringLiteral("*");
+    }
+    return title;
+}
+
+void MainWindow::saveCurrentDocumentState() {
+    if (m_restoringDocument || m_activeDocumentIndex < 0 || m_activeDocumentIndex >= static_cast<int>(m_documents.size())) {
+        return;
+    }
+    m_documents[static_cast<std::size_t>(m_activeDocumentIndex)] = captureDocumentState();
+}
+
+void MainWindow::restoreDocumentState(int index) {
+    if (index < 0 || index >= static_cast<int>(m_documents.size())) {
+        return;
+    }
+    m_restoringDocument = true;
+    m_activeDocumentIndex = index;
+    const DocumentState document = m_documents[static_cast<std::size_t>(index)];
+    m_loadedPrecursors = document.loadedPrecursors;
+    m_undoStack = document.undoStack;
+    m_redoStack = document.redoStack;
+    m_translationUndoActive = document.translationUndoActive;
+    restoreEditSnapshot(document.snapshot, false);
+    setLoadedPrecursors(m_loadedPrecursors);
+    refreshSelectionUi();
+    refreshPresetUi();
+    refreshPoseUi();
+    if (m_documentTabs != nullptr && m_documentTabs->currentIndex() != index) {
+        const QSignalBlocker block(m_documentTabs);
+        m_documentTabs->setCurrentIndex(index);
+    }
+    m_restoringDocument = false;
+}
+
+void MainWindow::refreshDocumentTabs() {
+    if (m_documentTabs == nullptr) {
+        return;
+    }
+    const QSignalBlocker block(m_documentTabs);
+    while (m_documentTabs->count() > 0) {
+        m_documentTabs->removeTab(0);
+    }
+    for (const DocumentState& document : m_documents) {
+        const int index = m_documentTabs->addTab(documentTabTitle(document.snapshot.structure));
+        m_documentTabs->setTabToolTip(index,
+            document.snapshot.structure.sourcePath.isEmpty()
+                ? document.snapshot.structure.title
+                : document.snapshot.structure.sourcePath);
+    }
+    if (m_activeDocumentIndex >= 0 && m_activeDocumentIndex < m_documentTabs->count()) {
+        m_documentTabs->setCurrentIndex(m_activeDocumentIndex);
+    }
+    if (m_closeTabAction != nullptr) {
+        m_closeTabAction->setEnabled(m_documentTabs->count() > 0);
+    }
+}
+
+void MainWindow::updateCurrentDocumentTabTitle() {
+    if (m_activeDocumentIndex < 0 || m_activeDocumentIndex >= static_cast<int>(m_documents.size())) {
+        return;
+    }
+    if (!m_restoringDocument) {
+        m_documents[static_cast<std::size_t>(m_activeDocumentIndex)] = captureDocumentState();
+    }
+    if (m_documentTabs != nullptr && m_activeDocumentIndex < m_documentTabs->count()) {
+        m_documentTabs->setTabText(m_activeDocumentIndex, documentTabTitle(m_structure));
+        m_documentTabs->setTabToolTip(m_activeDocumentIndex,
+            m_structure.sourcePath.isEmpty() ? m_structure.title : m_structure.sourcePath);
+    }
+}
+
+bool MainWindow::currentDocumentIsPristineDefault() const {
+    return m_documents.size() <= 1
+        && !m_structure.dirty
+        && m_structure.sourcePath.trimmed().isEmpty()
+        && m_undoStack.empty()
+        && m_redoStack.empty()
+        && m_poseGroups.empty()
+        && m_selectedAtomIds.empty();
+}
+
+void MainWindow::handleDocumentTabChanged(int index) {
+    if (m_restoringDocument || index == m_activeDocumentIndex) {
+        return;
+    }
+    saveCurrentDocumentState();
+    restoreDocumentState(index);
+}
+
+void MainWindow::newEmptyTab() {
+    saveCurrentDocumentState();
+    m_activeDocumentIndex = static_cast<int>(m_documents.size());
+    m_documents.push_back(DocumentState{});
+    m_structure = makeDefaultStructure();
+    m_structure.dirty = false;
+    m_supercellBaseStructure = m_structure;
+    m_hasSupercellBaseStructure = true;
+    m_lastEditWasSupercell = false;
+    m_supercellFactors = {1, 1, 1};
+    m_selectedAtomIds.clear();
+    m_loadedPrecursors.clear();
+    m_poseGroups.clear();
+    m_undoStack.clear();
+    m_redoStack.clear();
+    m_translationUndoActive = false;
+    applyStructureState(m_structure);
+    m_documents[static_cast<std::size_t>(m_activeDocumentIndex)] = captureDocumentState();
+    refreshDocumentTabs();
+    setCView(true);
+}
+
+void MainWindow::closeCurrentTab() {
+    if (m_activeDocumentIndex < 0 || m_activeDocumentIndex >= static_cast<int>(m_documents.size())) {
+        return;
+    }
+    if (m_structure.dirty) {
+        const auto reply = QMessageBox::question(
+            this,
+            m_japanese ? QStringLiteral("タブを閉じる") : QStringLiteral("Close tab"),
+            m_japanese
+                ? QStringLiteral("現在の構造には未保存の変更があります。このタブを閉じますか？")
+                : QStringLiteral("The current structure has unsaved changes. Close this tab?"),
+            QMessageBox::Yes | QMessageBox::No,
+            QMessageBox::No);
+        if (reply != QMessageBox::Yes) {
+            return;
+        }
+    }
+
+    const int closingIndex = m_activeDocumentIndex;
+    m_documents.erase(m_documents.begin() + closingIndex);
+    if (m_documents.empty()) {
+        m_activeDocumentIndex = -1;
+        initializeDefaultDocument();
+        return;
+    }
+    const int nextIndex = std::min(closingIndex, static_cast<int>(m_documents.size()) - 1);
+    refreshDocumentTabs();
+    restoreDocumentState(nextIndex);
+}
+
 bool MainWindow::loadStructureFile(const QString& path) { return loadFromPath(path); }
 
 void MainWindow::showEvent(QShowEvent* event) {
@@ -2704,14 +3161,24 @@ bool MainWindow::loadFromPath(const QString& path) {
         QMessageBox::warning(this, "Open Structure", QStringLiteral("File not found: %1").arg(path));
         return false;
     }
-    if (m_structure.dirty && !maybeSaveChanges()) {
-        return false;
-    }
     QString errorMessage;
     const auto loaded = m_loader->load(path, &errorMessage);
     if (!loaded.has_value()) {
         QMessageBox::warning(this, "Open Structure", errorMessage.isEmpty() ? "Failed to load structure." : errorMessage);
         return false;
+    }
+    const bool replaceCurrent = currentDocumentIsPristineDefault();
+    saveCurrentDocumentState();
+    if (replaceCurrent) {
+        if (m_documents.empty()) {
+            m_activeDocumentIndex = 0;
+            m_documents.push_back(DocumentState{});
+        } else if (m_activeDocumentIndex < 0) {
+            m_activeDocumentIndex = 0;
+        }
+    } else {
+        m_activeDocumentIndex = static_cast<int>(m_documents.size());
+        m_documents.push_back(DocumentState{});
     }
     m_structure = *loaded;
     m_structure.dirty = false;
@@ -2719,10 +3186,16 @@ bool MainWindow::loadFromPath(const QString& path) {
     m_hasSupercellBaseStructure = true;
     m_lastEditWasSupercell = false;
     m_supercellFactors = {1, 1, 1};
+    m_selectedAtomIds.clear();
+    m_loadedPrecursors.clear();
     m_undoStack.clear();
     m_redoStack.clear();
     m_poseGroups.clear();
+    m_translationUndoActive = false;
     applyStructureState(m_structure);
+    setLoadedPrecursors({});
+    m_documents[static_cast<std::size_t>(m_activeDocumentIndex)] = captureDocumentState();
+    refreshDocumentTabs();
     setCView(true);
     QTimer::singleShot(0, this, [this]() { setCView(true); });
     return true;
@@ -2748,6 +3221,7 @@ void MainWindow::applyStructureState(const StructureData& structure) {
     refreshPresetUi();
     refreshPoseUi();
     updateUndoRedoActions();
+    updateCurrentDocumentTabTitle();
 }
 
 void MainWindow::dragEnterEvent(QDragEnterEvent* event) { if (event->mimeData()->hasUrls()) event->acceptProposedAction(); }
@@ -2954,6 +3428,7 @@ void MainWindow::toggleLanguage() {
     const bool wasFullScreen = isFullScreen();
     const bool wasMaximized = isMaximized();
     const QRect previousGeometry = geometry();
+    saveCurrentDocumentState();
 
     m_japanese = !m_japanese;
     QSettings(QStringLiteral("ASEapp"), QStringLiteral("ASEappSurfaceBuilder"))
@@ -2977,7 +3452,9 @@ void MainWindow::toggleLanguage() {
 
     buildUi();
     reloadPresetRegistry();
+    refreshDocumentTabs();
     applyStructureState(m_structure);
+    setLoadedPrecursors(m_loadedPrecursors);
     setSelectedAtomIds(selectedAtomIds);
     refreshSelectionUi();
     refreshPresetUi();
@@ -4099,6 +4576,7 @@ void MainWindow::translateSelectedAtoms(const QVector3D& delta) {
     if (m_supercellStatusLabel != nullptr) {
         m_supercellStatusLabel->setText(supercellStatusText());
     }
+    updateCurrentDocumentTabTitle();
 }
 
 void MainWindow::finishSelectedAtomTranslation() {
@@ -4430,50 +4908,70 @@ void MainWindow::saveCustomBondRanges() const {
 }
 
 void MainWindow::editBondDistances() {
-    QStringList elements;
-    for (const auto& atom : m_structure.atoms) {
-        const QString element = vestaNormalizeElement(atom.element);
-        if (!element.isEmpty() && !elements.contains(element)) {
-            elements << element;
-        }
+    const auto pairs = atomPairDistancesForStructure(m_structure, m_customBondRanges);
+    if (pairs.empty()) {
+        QMessageBox::information(
+            this,
+            m_japanese ? QStringLiteral("原子対ボンド長") : QStringLiteral("Atom-pair bond lengths"),
+            m_japanese
+                ? QStringLiteral("原子が2個未満のため、編集できる原子対がありません。")
+                : QStringLiteral("At least two atoms are required before atom-pair lengths can be edited."));
+        return;
     }
 
-    QString initialA;
-    QString initialB;
-    double selectedDistance = 0.0;
-    if (m_selectedAtomIds.size() >= 2) {
-        const NativeAtom* first = findAtomByIdInStructure(m_structure, m_selectedAtomIds[0]);
-        const NativeAtom* second = findAtomByIdInStructure(m_structure, m_selectedAtomIds[1]);
-        if (first != nullptr && second != nullptr) {
-            initialA = first->element;
-            initialB = second->element;
-            selectedDistance = static_cast<double>((second->cartesian - first->cartesian).length());
-        }
-    }
-
-    BondDistanceDialog dialog(m_japanese, elements, m_customBondRanges, initialA, initialB, selectedDistance, this);
+    AtomPairLengthDialog dialog(m_japanese, pairs, this);
     if (dialog.exec() != QDialog::Accepted) {
         return;
     }
 
-    const QString key = vestaBondKey(dialog.elementA(), dialog.elementB());
-    if (dialog.resetCustom()) {
-        m_customBondRanges.remove(key);
-    } else {
-        const BondDistanceRange range = dialog.range();
-        if (range.maxDistance <= 0.0 || range.maxDistance < range.minDistance) {
-            QMessageBox::warning(this,
-                m_japanese ? QStringLiteral("ボンド距離設定") : QStringLiteral("Bond distance settings"),
-                m_japanese ? QStringLiteral("最大距離は最小距離以上にしてください。") : QStringLiteral("Maximum distance must be greater than or equal to minimum distance."));
-            return;
-        }
-        m_customBondRanges.insert(key, range);
+    const auto edits = dialog.edits();
+    if (edits.empty()) {
+        QMessageBox::information(
+            this,
+            m_japanese ? QStringLiteral("原子対ボンド長") : QStringLiteral("Atom-pair bond lengths"),
+            m_japanese
+                ? QStringLiteral("適用対象がありません。Target Å を変更するか、行を選択してください。")
+                : QStringLiteral("No rows were selected or changed. Edit Target Å or select rows before applying."));
+        return;
     }
-    saveCustomBondRanges();
-    syncCanvasDisplayOptions();
+
+    pushUndoState(QStringLiteral("atom_pair_bond_lengths"));
+    int changedCount = 0;
+    QStringList errors;
+    for (const AtomPairLengthEdit& edit : edits) {
+        QString error;
+        if (adjustAtomPairBondLength(m_structure, edit.atomAId, edit.atomBId, edit.targetLength, &error)) {
+            ++changedCount;
+        } else if (!error.isEmpty()) {
+            errors << error;
+        }
+    }
+
+    if (changedCount <= 0) {
+        if (!m_undoStack.empty()) {
+            m_undoStack.pop_back();
+        }
+        updateUndoRedoActions();
+        QMessageBox::warning(
+            this,
+            m_japanese ? QStringLiteral("原子対ボンド長") : QStringLiteral("Atom-pair bond lengths"),
+            m_japanese
+                ? QStringLiteral("有効なボンド長変更を適用できませんでした。")
+                : QStringLiteral("No valid atom-pair length change could be applied."));
+        return;
+    }
+
+    applyStructureState(m_structure);
     statusBar()->showMessage(m_japanese
-        ? QStringLiteral("ボンド距離設定を更新しました: %1").arg(key)
-        : QStringLiteral("Updated bond distance settings: %1").arg(key), 4000);
+        ? QStringLiteral("原子対ボンド長を更新しました: %1 件").arg(changedCount)
+        : QStringLiteral("Updated atom-pair bond length(s): %1").arg(changedCount), 4000);
+
+    if (!errors.empty()) {
+        QMessageBox::warning(
+            this,
+            m_japanese ? QStringLiteral("一部の原子対をスキップ") : QStringLiteral("Some atom pairs were skipped"),
+            errors.join(QStringLiteral("\n")));
+    }
 }
 
 void MainWindow::syncCanvasDisplayOptions() {
@@ -5291,6 +5789,31 @@ bool MainWindow::runAdsorbatePoseSelfTest(const QString& outputDirectory, QStrin
     }
     m_customBondRanges.clear();
     syncCanvasDisplayOptions();
+
+    if (m_structure.atoms.size() >= 2) {
+        const int atomAId = m_structure.atoms[0].atomId;
+        const int atomBId = m_structure.atoms[1].atomId;
+        const QVector3D atomAOriginal = m_structure.atoms[0].cartesian;
+        const double targetLength = static_cast<double>((m_structure.atoms[1].cartesian - m_structure.atoms[0].cartesian).length()) + 0.25;
+        QString atomPairError;
+        if (!adjustAtomPairBondLength(m_structure, atomAId, atomBId, targetLength, &atomPairError)) {
+            return fail(QStringLiteral("Atom-pair length edit failed: %1").arg(atomPairError));
+        }
+        const NativeAtom* adjustedA = findAtomByIdInStructure(m_structure, atomAId);
+        const NativeAtom* adjustedB = findAtomByIdInStructure(m_structure, atomBId);
+        if (adjustedA == nullptr || adjustedB == nullptr) {
+            return fail(QStringLiteral("Atom-pair length edit lost an atom."));
+        }
+        if (!require(closeVector(adjustedA->cartesian, atomAOriginal), QStringLiteral("atom-pair length edit keeps Atom A fixed"))) {
+            return fail(QStringLiteral("Atom A moved during atom-pair length edit."));
+        }
+        const double adjustedLength = static_cast<double>((adjustedB->cartesian - adjustedA->cartesian).length());
+        if (!require(close(adjustedLength, targetLength, 1.0e-4), QStringLiteral("atom-pair length edit reaches the target distance"))) {
+            return fail(QStringLiteral("Atom-pair length edit target mismatch."));
+        }
+        m_structure = initial;
+        applyStructureState(m_structure);
+    }
 
     PoseGroup group;
     group.name = QStringLiteral("methanol");

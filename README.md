@@ -10,7 +10,7 @@
 
 | やりたいこと | 最短ルート |
 | --- | --- |
-| アプリを起動したい | 同梱 Windows 版 [`standalone_exe/windows/ASEappSurfaceBuilder-1.1.0-Windows.exe`](standalone_exe/windows/ASEappSurfaceBuilder-1.1.0-Windows.exe) を実行 |
+| アプリを起動したい | 同梱 Windows 版 [`standalone_exe/windows/ASEappSurfaceBuilder-1.1.1-Windows.exe`](standalone_exe/windows/ASEappSurfaceBuilder-1.1.1-Windows.exe) を実行 |
 | 画面を見ながら使い方を知りたい | [操作ガイド `Guide.md`](Guide.md) を開く |
 | 自分でビルドしたい | [ソースからビルド](#ソースからビルド) を実行 |
 | 配布物を作り直したい | [`PACKAGING.md`](PACKAGING.md) を参照 |
@@ -19,6 +19,7 @@
 ## どんなアプリか
 
 - 構造ファイルを開き、球・ボンド・セル枠で確認できます。
+- アプリは単一起動に制限され、複数構造は既存ウィンドウ内のタブで切り替えられます。
 - 原子を選択して、直上・直下・原子間・多点中心・面法線上に新しい原子を置けます。
 - Supercell、真空層、セル軸傾き、slab 全体移動を GUI で調整できます。
 - 前駆体 CSV を保存/読み込みし、同じ相対配置を別の表面位置に再利用できます。
@@ -47,13 +48,13 @@
 
 | OS | 推奨 | 備考 |
 | --- | --- | --- |
-| Windows | [`standalone_exe/windows/ASEappSurfaceBuilder-1.1.0-Windows.exe`](standalone_exe/windows/ASEappSurfaceBuilder-1.1.0-Windows.exe) | 現在同梱している Windows 版は v1.1.0 です。互換確認用として v1.0.0 も同じフォルダに残しています。 |
+| Windows | [`standalone_exe/windows/ASEappSurfaceBuilder-1.1.1-Windows.exe`](standalone_exe/windows/ASEappSurfaceBuilder-1.1.1-Windows.exe) | 現在同梱している Windows 版は v1.1.1 です。互換確認用として v1.1.0 / v1.0.0 も同じフォルダに残しています。 |
 | macOS | [`standalone_exe/macos/ASEappSurfaceBuilder-1.1.0-macOS.dmg`](standalone_exe/macos/ASEappSurfaceBuilder-1.1.0-macOS.dmg) | v1.0.0 の DMG も [`standalone_exe/macos/`](standalone_exe/macos/) に残しています。 |
 | Linux | ソースからビルド | Qt 6 と CMake が必要です。 |
 
 ### Windows: 同梱 EXE を起動
 
-`standalone_exe/windows/ASEappSurfaceBuilder-1.1.0-Windows.exe` を実行してください。
+`standalone_exe/windows/ASEappSurfaceBuilder-1.1.1-Windows.exe` を実行してください。
 
 ### macOS
 
@@ -122,7 +123,7 @@ cmake --build code/native_ui/build --config Release --parallel 2
 - 真空層の追加・除去
 - slab 全体の a/b/c 方向移動
 - セル軸傾きによる step-terrace 候補作成
-- VESTA `SBOND` 風の元素ペア別ボンド距離 min/max Å 設定
+- 読み込まれている構造の全原子対距離一覧と、各 Target Å の個別ボンド長調整
 
 ### 前駆体・吸着分子ポーズ
 
@@ -156,6 +157,8 @@ cmake --build code/native_ui/build --config Release --parallel 2
 | Shift + 左ドラッグ | 選択原子を画面平面内で移動 |
 | Delete | 選択原子を削除 |
 | Esc | 選択解除 |
+| Ctrl + T | 新規構造タブ |
+| Ctrl + W | 現在の構造タブを閉じる |
 | F / ダブルクリック | フィット |
 | A / B / C | direct a/b/c 方向表示 |
 | Ctrl+Alt+A/B/C | reciprocal a*/b*/c* 方向表示 |

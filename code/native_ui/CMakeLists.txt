@@ -2,7 +2,7 @@
 if(POLICY CMP0091)
   cmake_policy(SET CMP0091 NEW)
 endif()
-project(aseapp_native_ui VERSION 1.1.0 LANGUAGES CXX)
+project(aseapp_native_ui VERSION 1.1.1 LANGUAGES CXX)
 
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -19,7 +19,7 @@ if(NOT DEFINED CMAKE_PREFIX_PATH)
 endif()
 
 find_package(Python3 REQUIRED COMPONENTS Interpreter)
-find_package(Qt6 REQUIRED COMPONENTS Widgets Gui Core)
+find_package(Qt6 REQUIRED COMPONENTS Widgets Gui Core Network)
 
 if(MSVC AND WIN32 AND DEFINED ENV{CONDA_PREFIX})
   # Conda's Qt packages are release CRT builds. Keep Debug targets on /MD as
@@ -76,7 +76,7 @@ add_executable(aseapp_native_ui
 
 target_include_directories(aseapp_native_ui PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/src)
 
-target_link_libraries(aseapp_native_ui PRIVATE Qt6::Widgets Qt6::Gui Qt6::Core)
+target_link_libraries(aseapp_native_ui PRIVATE Qt6::Widgets Qt6::Gui Qt6::Core Qt6::Network)
 
 configure_file(
   ${CMAKE_CURRENT_SOURCE_DIR}/src/aseapp_native_ui.rc.in
