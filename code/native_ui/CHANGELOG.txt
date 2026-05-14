@@ -10,6 +10,7 @@ Version 1.1.0 - Adsorbate pose editing release
 - VESTA SBOND 風の元素ペア別ボンド距離 min/max Å 設定を追加。
 - extended XYZ / adsorbate-only XYZ / pose JSON / ASE snippet 出力を追加。
 - Undo / Redo が構造、選択、吸着分子グループ情報を同期して復元するように修正。
+- トラックパッドのピンチズームを、ホイールと同じくカーソル位置基準で使えるように修正。
 - メタノール on Cu 実分子サンプルの GUI 自己テストと ASE round-trip テストを追加。
 Version 1.0.0 - Final local release
 -----------------------------------

@@ -15,6 +15,7 @@ standalone_exe/                          # 確認済み配布物の配置先
 
 現在リポジトリに同梱している確認済み配布物は次の通りです。
 
+- Windows: `standalone_exe/windows/ASEappSurfaceBuilder-1.1.0-Windows.exe`
 - Windows: `standalone_exe/windows/ASEappSurfaceBuilder-1.0.0-Windows.exe`
 - macOS: `standalone_exe/macos/ASEappSurfaceBuilder-1.0.0-macOS.dmg`
 - macOS: `standalone_exe/macos/ASEappSurfaceBuilder-1.1.0-macOS.dmg`
@@ -70,7 +71,7 @@ powershell -ExecutionPolicy Bypass -File code/native_ui/package_windows_launcher
 standalone_exe/windows/ASEappSurfaceBuilder-1.1.0-Windows.exe
 ```
 
-現在このリポジトリに同梱している Windows 版は `standalone_exe/windows/ASEappSurfaceBuilder-1.0.0-Windows.exe` です。v1.1.0 Windows 版は Windows 環境で上記手順を実行して生成してください。
+現在このリポジトリに同梱している Windows 版は `standalone_exe/windows/ASEappSurfaceBuilder-1.1.0-Windows.exe` です。互換確認用として `standalone_exe/windows/ASEappSurfaceBuilder-1.0.0-Windows.exe` も残しています。
 
 ### ローカル署名（開発確認用）
 

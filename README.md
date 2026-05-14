@@ -10,7 +10,7 @@
 
 | やりたいこと | 最短ルート |
 | --- | --- |
-| アプリを起動したい | [GitHub Releases](https://github.com/KoroCoding/ASEappSurfaceBuilder/releases/latest) から Windows 版を取得 |
+| アプリを起動したい | 同梱 Windows 版 [`standalone_exe/windows/ASEappSurfaceBuilder-1.1.0-Windows.exe`](standalone_exe/windows/ASEappSurfaceBuilder-1.1.0-Windows.exe) を実行 |
 | 画面を見ながら使い方を知りたい | [操作ガイド `Guide.md`](Guide.md) を開く |
 | 自分でビルドしたい | [ソースからビルド](#ソースからビルド) を実行 |
 | 配布物を作り直したい | [`PACKAGING.md`](PACKAGING.md) を参照 |
@@ -47,15 +47,13 @@
 
 | OS | 推奨 | 備考 |
 | --- | --- | --- |
-| Windows | [`standalone_exe/windows/ASEappSurfaceBuilder-1.0.0-Windows.exe`](standalone_exe/windows/ASEappSurfaceBuilder-1.0.0-Windows.exe) | 現在同梱している Windows 版は v1.0.0 です。v1.1.0 Windows 版は Windows 環境で再生成してください。 |
+| Windows | [`standalone_exe/windows/ASEappSurfaceBuilder-1.1.0-Windows.exe`](standalone_exe/windows/ASEappSurfaceBuilder-1.1.0-Windows.exe) | 現在同梱している Windows 版は v1.1.0 です。互換確認用として v1.0.0 も同じフォルダに残しています。 |
 | macOS | [`standalone_exe/macos/ASEappSurfaceBuilder-1.1.0-macOS.dmg`](standalone_exe/macos/ASEappSurfaceBuilder-1.1.0-macOS.dmg) | v1.0.0 の DMG も [`standalone_exe/macos/`](standalone_exe/macos/) に残しています。 |
 | Linux | ソースからビルド | Qt 6 と CMake が必要です。 |
 
 ### Windows: 同梱 EXE を起動
 
-`standalone_exe/windows/ASEappSurfaceBuilder-1.0.0-Windows.exe` を実行してください。
-
-v1.1.0 の Windows 版が必要な場合は、Windows 環境で `PACKAGING.md` の手順に従って `ASEappSurfaceBuilder-1.1.0-Windows.exe` を生成してください。
+`standalone_exe/windows/ASEappSurfaceBuilder-1.1.0-Windows.exe` を実行してください。
 
 ### macOS
 
@@ -151,7 +149,7 @@ cmake --build code/native_ui/build --config Release --parallel 2
 | --- | --- |
 | 左ドラッグ | 視点回転 |
 | 右 / 中ドラッグ | パン |
-| ホイール | ズーム |
+| ホイール / トラックパッドのピンチ | カーソル位置を基準にズーム |
 | 左クリック | 原子選択 |
 | Ctrl + 左クリック | 選択追加 / 解除 |
 | Ctrl + 左ドラッグ | 重なった奥の原子も追加選択 |
