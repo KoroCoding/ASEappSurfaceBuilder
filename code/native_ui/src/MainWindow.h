@@ -212,6 +212,7 @@ private:
     QAction* m_axisTiltAction = nullptr;
     QAction* m_showCellAction = nullptr;
     QAction* m_showBondsAction = nullptr;
+    QAction* m_showOutsideCellAction = nullptr;
     QAction* m_bondDistanceAction = nullptr;
     QAction* m_showAxesAction = nullptr;
     QAction* m_showLabelsAction = nullptr;
@@ -224,6 +225,7 @@ private:
     QAction* m_redoAction = nullptr;
     QCheckBox* m_showCellCheck = nullptr;
     QCheckBox* m_showBondsCheck = nullptr;
+    QCheckBox* m_showOutsideCellCheck = nullptr;
     QCheckBox* m_showAxesCheck = nullptr;
     QCheckBox* m_showLabelsCheck = nullptr;
     QCheckBox* m_perspectiveCheck = nullptr;

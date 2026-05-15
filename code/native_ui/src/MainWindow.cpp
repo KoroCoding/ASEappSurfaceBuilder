@@ -6,6 +6,8 @@
 #include "SurfaceOperations.h"
 
 #include <QAction>
+#include <QAbstractItemModel>
+#include <QAbstractItemView>
 #include <QApplication>
 #include <QCheckBox>
 #include <QColor>
@@ -32,6 +34,7 @@
 #include <QKeySequence>
 #include <QLabel>
 #include <QLineEdit>
+#include <QListWidget>
 #include <QJsonArray>
 #include <QJsonDocument>
 #include <QJsonObject>
@@ -43,6 +46,7 @@
 #include <QPainterPath>
 #include <QPaintEvent>
 #include <QPen>
+#include <QPixmap>
 #include <QPushButton>
 #include <QQuaternion>
 #include <QRadialGradient>
@@ -79,6 +83,7 @@
 #include <cstddef>
 #include <deque>
 #include <functional>
+#include <memory>
 #include <vector>
 #include <utility>
 
@@ -920,6 +925,8 @@ struct ElementLegendRenderOptions {
     int columns = 1;
     bool transparentBackground = false;
     bool includeCounts = false;
+    QString labelPrefix;
+    QString labelSuffix;
 };
 
 std::vector<ElementLegendEntry> elementLegendEntries(const StructureData& structure) {
@@ -1024,7 +1031,7 @@ QImage renderElementLegendImage(const std::vector<ElementLegendEntry>& entries, 
             sphereDiameter);
         drawLegendSphere(painter, sphereRect, entry.color);
 
-        QString label = entry.element;
+        QString label = options.labelPrefix + entry.element + options.labelSuffix;
         if (options.includeCounts) {
             label += QStringLiteral(" (%1)").arg(entry.count);
         }
@@ -1336,15 +1343,23 @@ private:
 
 class ElementLegendExportDialog final : public QDialog {
 public:
-    explicit ElementLegendExportDialog(bool japanese, int elementCount, QWidget* parent = nullptr) : QDialog(parent) {
+    explicit ElementLegendExportDialog(bool japanese, std::vector<ElementLegendEntry> entries, QWidget* parent = nullptr)
+        : QDialog(parent),
+          m_entries(std::move(entries))
+    {
         setWindowTitle(japanese ? QStringLiteral("原子一覧画像を出力") : QStringLiteral("Export atom legend image"));
+        setMinimumSize(920, 560);
         auto* layout = new QVBoxLayout(this);
         auto* note = new QLabel(japanese
-            ? QStringLiteral("現在の構造に含まれる元素を、発表資料向けの球＋ラベルのPNG画像として出力します。")
-            : QStringLiteral("Export the elements in the current structure as a publication-ready PNG legend with spheres and labels."),
+            ? QStringLiteral("現在の構造に含まれる元素を、発表資料向けの球＋ラベルのPNG画像として出力します。右側でプレビューを確認できます。")
+            : QStringLiteral("Export the elements in the current structure as a publication-ready PNG legend with spheres and labels. Preview is shown on the right."),
             this);
         note->setWordWrap(true);
         layout->addWidget(note);
+
+        auto* body = new QHBoxLayout();
+        auto* leftPanel = new QVBoxLayout();
+        body->addLayout(leftPanel, 0);
 
         auto* form = new QFormLayout();
         m_widthPreset = new QComboBox(this);
@@ -1369,7 +1384,7 @@ public:
         m_dpi->setValue(300);
 
         m_columns = new QSpinBox(this);
-        m_columns->setRange(1, std::max(1, std::min(4, elementCount)));
+        m_columns->setRange(1, std::max(1, std::min(4, static_cast<int>(m_entries.size()))));
         m_columns->setValue(1);
         m_columns->setToolTip(japanese
             ? QStringLiteral("1列は添付画像のような縦一覧、複数列は元素数が多い発表図向けです。")
@@ -1382,6 +1397,11 @@ public:
         m_includeCounts = new QCheckBox(japanese ? QStringLiteral("原子数も表示") : QStringLiteral("Show atom counts"), this);
         m_includeCounts->setChecked(false);
 
+        m_labelPrefix = new QLineEdit(this);
+        m_labelPrefix->setPlaceholderText(japanese ? QStringLiteral("例: [") : QStringLiteral("Example: ["));
+        m_labelSuffix = new QLineEdit(this);
+        m_labelSuffix->setPlaceholderText(japanese ? QStringLiteral("例: ]") : QStringLiteral("Example: ]"));
+
         auto* widthRow = new QHBoxLayout();
         widthRow->addWidget(m_widthPreset, 1);
         widthRow->addWidget(m_width);
@@ -1390,8 +1410,56 @@ public:
         form->addRow(QStringLiteral("DPI"), m_dpi);
         form->addRow(japanese ? QStringLiteral("列数") : QStringLiteral("Columns"), m_columns);
         form->addRow(japanese ? QStringLiteral("背景") : QStringLiteral("Background"), m_background);
+        form->addRow(japanese ? QStringLiteral("原子名の前") : QStringLiteral("Name prefix"), m_labelPrefix);
+        form->addRow(japanese ? QStringLiteral("原子名の後") : QStringLiteral("Name suffix"), m_labelSuffix);
         form->addRow(QString(), m_includeCounts);
-        layout->addLayout(form);
+        leftPanel->addLayout(form);
+
+        auto* orderGroup = new QGroupBox(japanese ? QStringLiteral("表示順") : QStringLiteral("Display order"), this);
+        auto* orderLayout = new QVBoxLayout(orderGroup);
+        auto* orderNote = new QLabel(japanese
+            ? QStringLiteral("上にある元素から順にPNGへ出力します。ドラッグ、または上下ボタンで入れ替えできます。")
+            : QStringLiteral("The PNG uses this order from top to bottom. Drag items or use the Up/Down buttons."),
+            orderGroup);
+        orderNote->setWordWrap(true);
+        orderLayout->addWidget(orderNote);
+        m_orderList = new QListWidget(orderGroup);
+        m_orderList->setSelectionMode(QAbstractItemView::SingleSelection);
+        m_orderList->setDragDropMode(QAbstractItemView::InternalMove);
+        m_orderList->setDefaultDropAction(Qt::MoveAction);
+        m_orderList->setAlternatingRowColors(true);
+        for (const auto& entry : m_entries) {
+            auto* item = new QListWidgetItem(QStringLiteral("%1 (%2)").arg(entry.element).arg(entry.count), m_orderList);
+            item->setData(Qt::UserRole, entry.element);
+            item->setFlags(item->flags() | Qt::ItemIsDragEnabled | Qt::ItemIsDropEnabled);
+        }
+        if (m_orderList->count() > 0) {
+            m_orderList->setCurrentRow(0);
+        }
+        orderLayout->addWidget(m_orderList, 1);
+        auto* orderButtonRow = new QHBoxLayout();
+        auto* moveUpButton = new QPushButton(japanese ? QStringLiteral("上へ") : QStringLiteral("Up"), orderGroup);
+        auto* moveDownButton = new QPushButton(japanese ? QStringLiteral("下へ") : QStringLiteral("Down"), orderGroup);
+        orderButtonRow->addWidget(moveUpButton);
+        orderButtonRow->addWidget(moveDownButton);
+        orderLayout->addLayout(orderButtonRow);
+        leftPanel->addWidget(orderGroup, 1);
+
+        auto* previewPanel = new QVBoxLayout();
+        auto* previewTitle = new QLabel(japanese ? QStringLiteral("プレビュー") : QStringLiteral("Preview"), this);
+        QFont previewTitleFont = previewTitle->font();
+        previewTitleFont.setBold(true);
+        previewTitle->setFont(previewTitleFont);
+        previewPanel->addWidget(previewTitle);
+        m_preview = new QLabel(this);
+        m_preview->setAlignment(Qt::AlignCenter);
+        m_preview->setMinimumSize(420, 390);
+        m_preview->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Expanding);
+        m_preview->setFrameShape(QFrame::StyledPanel);
+        m_preview->setStyleSheet(QStringLiteral("QLabel { background: #f5f7fb; border: 1px solid #c8d0dc; }"));
+        previewPanel->addWidget(m_preview, 1);
+        body->addLayout(previewPanel, 1);
+        layout->addLayout(body, 1);
 
         connect(m_widthPreset, QOverload<int>::of(&QComboBox::currentIndexChanged), this, [this]() {
             const int presetWidth = m_widthPreset->currentData().toInt();
@@ -1402,12 +1470,25 @@ public:
                 m_width->setEnabled(true);
                 m_width->setFocus();
             }
+            updatePreview();
         });
+        connect(m_width, QOverload<int>::of(&QSpinBox::valueChanged), this, [this]() { updatePreview(); });
+        connect(m_dpi, QOverload<int>::of(&QSpinBox::valueChanged), this, [this]() { updatePreview(); });
+        connect(m_columns, QOverload<int>::of(&QSpinBox::valueChanged), this, [this]() { updatePreview(); });
+        connect(m_background, QOverload<int>::of(&QComboBox::currentIndexChanged), this, [this]() { updatePreview(); });
+        connect(m_includeCounts, &QCheckBox::toggled, this, [this]() { updatePreview(); });
+        connect(m_labelPrefix, &QLineEdit::textChanged, this, [this]() { updatePreview(); });
+        connect(m_labelSuffix, &QLineEdit::textChanged, this, [this]() { updatePreview(); });
+        connect(m_orderList->model(), &QAbstractItemModel::rowsMoved, this, [this]() { updatePreview(); });
+        connect(moveUpButton, &QPushButton::clicked, this, [this]() { moveSelectedEntry(-1); });
+        connect(moveDownButton, &QPushButton::clicked, this, [this]() { moveSelectedEntry(1); });
 
         auto* buttons = new QDialogButtonBox(QDialogButtonBox::Ok | QDialogButtonBox::Cancel, this);
         connect(buttons, &QDialogButtonBox::accepted, this, &QDialog::accept);
         connect(buttons, &QDialogButtonBox::rejected, this, &QDialog::reject);
         layout->addWidget(buttons);
+
+        QTimer::singleShot(0, this, [this]() { updatePreview(); });
     }
 
     ElementLegendRenderOptions options() const {
@@ -1417,16 +1498,64 @@ public:
         options.columns = m_columns->value();
         options.transparentBackground = m_background->currentData().toInt() == 1;
         options.includeCounts = m_includeCounts->isChecked();
+        options.labelPrefix = m_labelPrefix->text();
+        options.labelSuffix = m_labelSuffix->text();
         return options;
     }
 
+    std::vector<ElementLegendEntry> orderedEntries() const {
+        std::vector<ElementLegendEntry> ordered;
+        ordered.reserve(m_entries.size());
+        for (int row = 0; row < m_orderList->count(); ++row) {
+            const QString element = m_orderList->item(row)->data(Qt::UserRole).toString();
+            auto found = std::find_if(m_entries.begin(), m_entries.end(), [&element](const ElementLegendEntry& entry) {
+                return entry.element == element;
+            });
+            if (found != m_entries.end()) {
+                ordered.push_back(*found);
+            }
+        }
+        return ordered;
+    }
+
 private:
+    void moveSelectedEntry(int direction) {
+        const int currentRow = m_orderList->currentRow();
+        const int targetRow = currentRow + direction;
+        if (currentRow < 0 || targetRow < 0 || targetRow >= m_orderList->count()) {
+            return;
+        }
+        std::unique_ptr<QListWidgetItem> item(m_orderList->takeItem(currentRow));
+        m_orderList->insertItem(targetRow, item.release());
+        m_orderList->setCurrentRow(targetRow);
+        updatePreview();
+    }
+
+    void updatePreview() {
+        if (m_preview == nullptr) {
+            return;
+        }
+        auto previewOptions = options();
+        previewOptions.widthPx = std::clamp(std::max(420, m_preview->width() * 2), 420, 900);
+        previewOptions.dpi = 96;
+        const QImage image = renderElementLegendImage(orderedEntries(), previewOptions);
+        const QSize targetSize = m_preview->contentsRect().size().isValid()
+            ? m_preview->contentsRect().size() - QSize(18, 18)
+            : QSize(420, 390);
+        m_preview->setPixmap(QPixmap::fromImage(image).scaled(targetSize, Qt::KeepAspectRatio, Qt::SmoothTransformation));
+    }
+
+    std::vector<ElementLegendEntry> m_entries;
     QComboBox* m_widthPreset = nullptr;
     QSpinBox* m_width = nullptr;
     QSpinBox* m_dpi = nullptr;
     QSpinBox* m_columns = nullptr;
     QComboBox* m_background = nullptr;
     QCheckBox* m_includeCounts = nullptr;
+    QLineEdit* m_labelPrefix = nullptr;
+    QLineEdit* m_labelSuffix = nullptr;
+    QListWidget* m_orderList = nullptr;
+    QLabel* m_preview = nullptr;
 };
 
 class BondDistanceDialog final : public QDialog {
@@ -1977,6 +2106,7 @@ public:
             "・ダブルクリック / F: フィット\n"
             "・A/B/C: direct a,b,c 方向へ視点を切り替え\n"
             "・Ctrl+Alt+A/B/C: reciprocal a*,b*,c* 方向へ視点を切り替え\n"
+            "・格子外: 単位格子外の原子とボンドの表示を切替\n"
             "・操作モード: 視点移動 / 原子移動 / モデル表示移動を右パネルで切替")
             : QStringLiteral(
             "Usage:\n"
@@ -1989,7 +2119,7 @@ public:
             "7. Use Axis tilt to tilt c or another cell axis toward a/b for step-terrace candidates.\n"
             "8. Use Vacuum to add/remove vacuum or move the whole slab. Remove vacuum immediately tightens the c-axis.\n"
             "9. Use Atom-pair lengths to list every atom-pair distance in the loaded structure and edit each Target Å individually.\n"
-            "10. Use Atom legend PNG to export a sphere-and-label image for papers or presentations with selectable resolution/DPI.\n\n"
+            "10. Use Atom legend PNG to preview/export a sphere-and-label image, add label prefix/suffix text, and reorder elements before saving.\n\n"
             "View controls:\n"
             "・Initial view: c-axis\n"
             "・Left drag: rotate\n"
@@ -1999,6 +2129,7 @@ public:
             "・Double-click / F: fit\n"
             "・A/B/C: switch to direct a,b,c view\n"
             "・Ctrl+Alt+A/B/C: switch to reciprocal a*,b*,c* view\n"
+            "・Outside cell: show or hide atoms and bonds outside the unit cell\n"
             "・Interaction mode: switch Move view / Move atoms / Move model display on the right panel"));
         layout->addWidget(label);
         auto* buttons = new QDialogButtonBox(QDialogButtonBox::Close, this);
@@ -2050,6 +2181,7 @@ public:
             "<li>初期視点は c 方向です。</li>"
             "<li>左ドラッグ: 回転 / 右・中ドラッグ: パン / ホイール: カーソル位置を中心にズーム</li>"
             "<li>A/B/C: direct a,b,c 方向 / Ctrl+Alt+A/B/C: reciprocal a*,b*,c* 方向 / F: フィット</li>"
+            "<li>格子外をオフにすると、単位格子外の原子とそれにつながるボンドを隠せます。初期表示ではラベルをオフにし、VESTA風の ball-and-stick に寄せています。</li>"
             "<li>c と c* は、c 軸が ab 面法線と平行なセルでは同じ向きになります。</li>"
             "<li>右パネルの操作モードで、左ドラッグを視点回転 / 選択原子移動 / モデル全体の表示位置移動に切り替えます。</li>"
             "</ul>")
@@ -2077,12 +2209,13 @@ public:
             "</ul>"
             "<b>4. Presentation output</b><ul>"
             "<li>Use Atom-pair lengths to list each atom-pair distance in the loaded structure and edit the Target Å value individually.</li>"
-            "<li>Use Atom legend PNG to export the elements in the current structure as a sphere-and-label image. Width, DPI, columns, and white/transparent background are selectable.</li>"
+            "<li>Use Atom legend PNG to preview/export the elements in the current structure as a sphere-and-label image. Width, DPI, columns, background, label prefix/suffix, and element order are selectable.</li>"
             "</ul>"
             "<b>5. View controls</b><ul>"
             "<li>Initial view is c-axis.</li>"
             "<li>Left drag: rotate / Right or middle drag: pan / Wheel or trackpad pinch: zoom at cursor</li>"
             "<li>A/B/C: direct a,b,c view / Ctrl+Alt+A/B/C: reciprocal a*,b*,c* view / F: fit</li>"
+            "<li>Turn Outside cell off to hide atoms outside the unit cell and their bonds. Atom labels are off by default for a VESTA-like ball-and-stick view.</li>"
             "<li>c and c* look the same when c is parallel to the ab-plane normal.</li>"
             "<li>Use Interaction mode on the right panel to choose whether left drag rotates the view, moves selected atoms, or pans the whole model display.</li>"
             "</ul>"));
@@ -2163,6 +2296,7 @@ QString MainWindow::uiText(const QString& key) const {
         if (key == "pose_tip") return QStringLiteral("選択原子群を剛体グループとして保持し、明示的な数値入力で並進・pivot回転します。通常ドラッグだけで奥行きは変えません。");
         if (key == "reload") return QStringLiteral("プリセット再読込");
         if (key == "open_json") return QStringLiteral("JSONを開く");
+        if (key == "view") return QStringLiteral("表示");
         if (key == "help") return QStringLiteral("ヘルプ");
         if (key == "usage") return QStringLiteral("使い方");
         if (key == "about") return QStringLiteral("このアプリについて");
@@ -2170,6 +2304,8 @@ QString MainWindow::uiText(const QString& key) const {
         if (key == "selected_none") return QStringLiteral("選択原子: なし");
         if (key == "cell") return QStringLiteral("セル");
         if (key == "bonds") return QStringLiteral("ボンド");
+        if (key == "outside_cell") return QStringLiteral("格子外");
+        if (key == "outside_cell_tip") return QStringLiteral("VESTA風に周期境界でつながる格子外の複製原子とボンドを表示/非表示します。");
         if (key == "bond_distances") return QStringLiteral("原子対ボンド長");
         if (key == "bond_distances_tip") return QStringLiteral("読み込まれている構造の全原子対距離を一覧し、Target Å を指定して個別に修正します。");
         if (key == "axes") return QStringLiteral("軸");
@@ -2251,6 +2387,7 @@ QString MainWindow::uiText(const QString& key) const {
         if (key == "pose_tip") return QStringLiteral("Keep the selected atoms as one rigid adsorbate group and translate/rotate it with explicit numeric controls. Plain dragging does not change depth.");
         if (key == "reload") return QStringLiteral("Reload presets");
         if (key == "open_json") return QStringLiteral("Open JSON");
+        if (key == "view") return QStringLiteral("View");
         if (key == "help") return QStringLiteral("Help");
         if (key == "usage") return QStringLiteral("Usage");
         if (key == "about") return QStringLiteral("About");
@@ -2258,6 +2395,8 @@ QString MainWindow::uiText(const QString& key) const {
         if (key == "selected_none") return QStringLiteral("Selected atoms: none");
         if (key == "cell") return QStringLiteral("Cell");
         if (key == "bonds") return QStringLiteral("Bonds");
+        if (key == "outside_cell") return QStringLiteral("Outside cell");
+        if (key == "outside_cell_tip") return QStringLiteral("Show or hide VESTA-like periodic image atoms and bonds outside the unit cell.");
         if (key == "bond_distances") return QStringLiteral("Atom-pair lengths");
         if (key == "bond_distances_tip") return QStringLiteral("List every atom-pair distance in the loaded structure and edit each Target Å individually.");
         if (key == "axes") return QStringLiteral("Axes");
@@ -2769,15 +2908,18 @@ void MainWindow::buildUi() {
     m_showCellCheck->setChecked(true);
     m_showBondsCheck = new QCheckBox(uiText(QStringLiteral("bonds")));
     m_showBondsCheck->setChecked(true);
+    m_showOutsideCellCheck = new QCheckBox(uiText(QStringLiteral("outside_cell")));
+    m_showOutsideCellCheck->setChecked(true);
+    m_showOutsideCellCheck->setToolTip(uiText(QStringLiteral("outside_cell_tip")));
     m_showAxesCheck = new QCheckBox(uiText(QStringLiteral("axes")));
     m_showAxesCheck->setChecked(true);
     m_showLabelsCheck = new QCheckBox(uiText(QStringLiteral("labels")));
-    m_showLabelsCheck->setChecked(true);
+    m_showLabelsCheck->setChecked(false);
     m_perspectiveCheck = new QCheckBox(uiText(QStringLiteral("perspective")));
     m_perspectiveCheck->setChecked(false);
     m_depthCueCheck = new QCheckBox(uiText(QStringLiteral("depth_cue")));
     m_depthCueCheck->setChecked(false);
-    for (auto* check : {m_showCellCheck, m_showBondsCheck, m_showAxesCheck, m_showLabelsCheck, m_perspectiveCheck, m_depthCueCheck}) {
+    for (auto* check : {m_showCellCheck, m_showBondsCheck, m_showOutsideCellCheck, m_showAxesCheck, m_showLabelsCheck, m_perspectiveCheck, m_depthCueCheck}) {
         displayLayout->addWidget(check);
         connect(check, &QCheckBox::toggled, this, &MainWindow::syncCanvasDisplayOptions);
     }
@@ -2787,7 +2929,7 @@ void MainWindow::buildUi() {
     displayLayout->addWidget(bondDistanceButton);
     m_atomScaleSpin = new QDoubleSpinBox();
     m_atomScaleSpin->setRange(60.0, 180.0);
-    m_atomScaleSpin->setValue(90.0);
+    m_atomScaleSpin->setValue(100.0);
     m_atomScaleSpin->setSuffix("%");
     m_atomScaleSpin->setSingleStep(5.0);
     m_atomScaleSpin->setToolTip("Scale the atom spheres on screen.");
@@ -2902,6 +3044,10 @@ void MainWindow::buildUi() {
     m_showBondsAction->setToolTip("Show or hide bond connections.");
     connect(m_showBondsAction, &QAction::toggled, m_showBondsCheck, &QCheckBox::setChecked);
     connect(m_showBondsCheck, &QCheckBox::toggled, m_showBondsAction, &QAction::setChecked);
+    m_showOutsideCellAction = toolbar->addAction(uiText(QStringLiteral("outside_cell"))); m_showOutsideCellAction->setCheckable(true); m_showOutsideCellAction->setChecked(true);
+    m_showOutsideCellAction->setToolTip(uiText(QStringLiteral("outside_cell_tip")));
+    connect(m_showOutsideCellAction, &QAction::toggled, m_showOutsideCellCheck, &QCheckBox::setChecked);
+    connect(m_showOutsideCellCheck, &QCheckBox::toggled, m_showOutsideCellAction, &QAction::setChecked);
     m_bondDistanceAction = toolbar->addAction(uiText(QStringLiteral("bond_distances")));
     m_bondDistanceAction->setToolTip(uiText(QStringLiteral("bond_distances_tip")));
     connect(m_bondDistanceAction, &QAction::triggered, this, &MainWindow::editBondDistances);
@@ -2909,7 +3055,7 @@ void MainWindow::buildUi() {
     m_showAxesAction->setToolTip("Show or hide the XYZ axes.");
     connect(m_showAxesAction, &QAction::toggled, m_showAxesCheck, &QCheckBox::setChecked);
     connect(m_showAxesCheck, &QCheckBox::toggled, m_showAxesAction, &QAction::setChecked);
-    m_showLabelsAction = toolbar->addAction(uiText(QStringLiteral("labels"))); m_showLabelsAction->setCheckable(true); m_showLabelsAction->setChecked(true);
+    m_showLabelsAction = toolbar->addAction(uiText(QStringLiteral("labels"))); m_showLabelsAction->setCheckable(true); m_showLabelsAction->setChecked(false);
     m_showLabelsAction->setToolTip("Show or hide atom labels.");
     connect(m_showLabelsAction, &QAction::toggled, m_showLabelsCheck, &QCheckBox::setChecked);
     connect(m_showLabelsCheck, &QCheckBox::toggled, m_showLabelsAction, &QAction::setChecked);
@@ -2935,6 +3081,16 @@ void MainWindow::buildUi() {
             toggleLanguage();
         }
     });
+
+    auto* viewMenu = menuBar()->addMenu(uiText(QStringLiteral("view")));
+    viewMenu->addAction(m_showCellAction);
+    viewMenu->addAction(m_showBondsAction);
+    viewMenu->addAction(m_showOutsideCellAction);
+    viewMenu->addAction(m_showAxesAction);
+    viewMenu->addAction(m_showLabelsAction);
+    viewMenu->addSeparator();
+    viewMenu->addAction(m_perspectiveAction);
+    viewMenu->addAction(m_depthCueAction);
 
     auto* helpMenu = menuBar()->addMenu(uiText(QStringLiteral("help")));
     auto* quickStartAction = helpMenu->addAction(uiText(QStringLiteral("quick_start")));
@@ -3452,7 +3608,7 @@ void MainWindow::exportElementLegendImage() {
         return;
     }
 
-    ElementLegendExportDialog dialog(m_japanese, static_cast<int>(entries.size()), this);
+    ElementLegendExportDialog dialog(m_japanese, entries, this);
     if (dialog.exec() != QDialog::Accepted) {
         return;
     }
@@ -3471,7 +3627,7 @@ void MainWindow::exportElementLegendImage() {
     }
 
     const ElementLegendRenderOptions options = dialog.options();
-    const QImage image = renderElementLegendImage(entries, options);
+    const QImage image = renderElementLegendImage(dialog.orderedEntries(), options);
     if (!image.save(path, "PNG")) {
         QMessageBox::critical(
             this,
@@ -5056,6 +5212,7 @@ void MainWindow::syncCanvasDisplayOptions() {
     StructureCanvas::DisplayOptions options = m_canvas->displayOptions();
     options.showCell = m_showCellCheck->isChecked();
     options.showBonds = m_showBondsCheck->isChecked();
+    options.showOutsideCell = m_showOutsideCellCheck->isChecked();
     options.showAxes = m_showAxesCheck->isChecked();
     options.showLabels = m_showLabelsCheck->isChecked();
     options.perspective = m_perspectiveCheck->isChecked();
@@ -5866,6 +6023,49 @@ bool MainWindow::runAdsorbatePoseSelfTest(const QString& outputDirectory, QStrin
         return fail(QStringLiteral("Custom Cu-C minimum bond distance did not filter bonds."));
     }
     m_customBondRanges.clear();
+    syncCanvasDisplayOptions();
+
+    const StructureData poseStructureAfterBondRangeCheck = m_structure;
+    StructureData periodicBoundaryStructure;
+    periodicBoundaryStructure.title = QStringLiteral("ASEapp periodic boundary display self-test");
+    periodicBoundaryStructure.cellVectors = {
+        QVector3D(10.0f, 0.0f, 0.0f),
+        QVector3D(0.0f, 10.0f, 0.0f),
+        QVector3D(0.0f, 0.0f, 10.0f)
+    };
+    periodicBoundaryStructure.atoms = {
+        selfTestAtom(periodicBoundaryStructure, 1, QStringLiteral("Fe"), QVector3D(0.35f, 5.0f, 5.0f), QStringLiteral("boundary-Fe")),
+        selfTestAtom(periodicBoundaryStructure, 2, QStringLiteral("O"), QVector3D(9.35f, 5.0f, 5.0f), QStringLiteral("boundary-O"))
+    };
+    m_structure = periodicBoundaryStructure;
+    m_supercellBaseStructure = m_structure;
+    m_hasSupercellBaseStructure = true;
+    m_lastEditWasSupercell = false;
+    m_supercellFactors = {1, 1, 1};
+    applyStructureState(m_structure);
+    if (m_showOutsideCellCheck != nullptr) {
+        m_showOutsideCellCheck->setChecked(false);
+    }
+    syncCanvasDisplayOptions();
+    const int insideOnlyBoundaryBondCount = m_canvas != nullptr ? m_canvas->bondCount() : 0;
+    if (m_showOutsideCellCheck != nullptr) {
+        m_showOutsideCellCheck->setChecked(true);
+    }
+    syncCanvasDisplayOptions();
+    const int periodicBoundaryBondCount = m_canvas != nullptr ? m_canvas->bondCount() : 0;
+    if (!require(periodicBoundaryBondCount > insideOnlyBoundaryBondCount,
+            QStringLiteral("outside-cell toggle adds VESTA-like periodic boundary bonds"))) {
+        return fail(QStringLiteral("Outside-cell periodic boundary display did not add image bonds."));
+    }
+    m_structure = poseStructureAfterBondRangeCheck;
+    m_supercellBaseStructure = m_structure;
+    m_hasSupercellBaseStructure = true;
+    m_lastEditWasSupercell = false;
+    m_supercellFactors = {1, 1, 1};
+    applyStructureState(m_structure);
+    if (m_showOutsideCellCheck != nullptr) {
+        m_showOutsideCellCheck->setChecked(true);
+    }
     syncCanvasDisplayOptions();
 
     if (m_structure.atoms.size() >= 2) {

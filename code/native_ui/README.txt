@@ -6,7 +6,7 @@ ASEapp Surface Builder
 起動方法
 --------
 - 単体 launcher 版を使う場合:
-  ASEappSurfaceBuilder-1.1.2-Windows.exe を実行します。
+  ASEappSurfaceBuilder-1.2.0-Windows.exe を実行します。
 
 - ZIP 展開版を使う場合:
   bin\ASEappNativeUI.exe を実行します。
@@ -49,6 +49,9 @@ Ctrl+W: 現在の構造タブを閉じる
 
 補足
 ----
+- 通常ボンドは VESTA 風に、両端原子の色で半分ずつ、端から中心まで同じ太さで表示します。
+- ツールバーまたは表示メニューの「格子外」で、VESTA風に周期境界で単位格子外へ続く複製原子とボンドを表示/非表示できます。
+- 初期フィットは表示中の原子を優先し、VESTA の ball-and-stick に近い原子サイズで表示します。
 - 配置プレビューは既定で非表示です。必要な時だけ「配置プレビューを表示」をオンにしてください。
 - 吸着分子ポーズ編集のプレビューも既定で非表示です。「ポーズプレビューを表示」をオンにし、並進 / 回転 / 結合長の対象を選ぶと、Apply 前に半透明で確認できます。
 - ツールバーの「原子対ボンド長」では、読み込まれている構造の全原子対距離を一覧し、Target Å を変更して個別にボンド長を調整できます。Atom A は固定され、Atom B が現在の原子対方向に沿って移動します。
@@ -61,3 +64,4 @@ Ctrl+W: 現在の構造タブを閉じる
 - "no Qt platform plugin could be initialized" が出る場合は古い配布物や bin だけの移動が原因です。単体 launcher 版を使うか、ZIP 全体を展開してください。
 
 詳しくは QUICKSTART.txt と CHANGELOG.txt も確認してください。
+- Atom legend PNG export now shows a side preview and supports label prefix/suffix plus manual element ordering.

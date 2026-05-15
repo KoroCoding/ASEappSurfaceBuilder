@@ -20,6 +20,7 @@ public:
     struct DisplayOptions {
         bool showCell = true;
         bool showBonds = true;
+        bool showOutsideCell = true;
         bool showAxes = true;
         bool showLabels = false;
         bool perspective = false;
@@ -71,8 +72,19 @@ private:
     struct BondSegment {
         int atomA = -1;
         int atomB = -1;
+        int imageA = 0;
+        int imageB = 0;
+        int imageC = 0;
         QVector3D shiftB;
         double distance = 0.0;
+    };
+
+    struct AtomImage {
+        int atom = -1;
+        int imageA = 0;
+        int imageB = 0;
+        int imageC = 0;
+        QVector3D shift;
     };
 
     QVector3D rotatePoint(const QVector3D& point) const;
@@ -101,6 +113,7 @@ private:
     DisplayOptions m_displayOptions;
     InteractionMode m_interactionMode = InteractionMode::View;
     std::vector<BondSegment> m_cachedBonds;
+    std::vector<AtomImage> m_cachedAtomImages;
     QVector3D m_cachedCenter;
     double m_cachedRadius = 1.0;
     double m_cachedNearestAtomDistance = 0.0;

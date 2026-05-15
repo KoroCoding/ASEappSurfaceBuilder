@@ -1,5 +1,5 @@
 param(
-    [string]$Version = '1.1.2',
+    [string]$Version = '1.2.0',
     [string]$ZipPath = '',
     [string]$OutputExe = '',
     [string]$SignCertThumbprint = $env:ASEAPP_CODESIGN_THUMBPRINT,
@@ -237,7 +237,7 @@ set_target_properties(aseapp_launcher PROPERTIES
     MSVC_RUNTIME_LIBRARY "MultiThreaded"
 )
 
-target_link_libraries(aseapp_launcher PRIVATE Shell32 User32)
+target_link_libraries(aseapp_launcher PRIVATE Shell32 User32 Gdi32)
 '@
     Set-Content -LiteralPath (Join-Path $launcherRoot 'CMakeLists.txt') -Value $cmakeLists -Encoding ASCII
 

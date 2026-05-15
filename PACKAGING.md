@@ -15,6 +15,7 @@ standalone_exe/                          # 確認済み配布物の配置先
 
 現在リポジトリに同梱している確認済み配布物は次の通りです。
 
+- Windows: `standalone_exe/windows/ASEappSurfaceBuilder-1.2.0-Windows.exe`
 - Windows: `standalone_exe/windows/ASEappSurfaceBuilder-1.1.2-Windows.exe`
 - Windows: `standalone_exe/windows/ASEappSurfaceBuilder-1.1.1-Windows.exe`
 - Windows: `standalone_exe/windows/ASEappSurfaceBuilder-1.1.0-Windows.exe`
@@ -24,10 +25,10 @@ standalone_exe/                          # 確認済み配布物の配置先
 
 次回以降の GitHub Releases には次の名前でアップロードします。
 
-- Windows 単体 launcher: `ASEappSurfaceBuilder-1.1.2-Windows.exe`
-- Windows ZIP: `ASEappSurfaceBuilder-1.1.2-Windows.zip`
-- Linux: `ASEappSurfaceBuilder-1.1.2-Linux.tar.gz`
-- macOS: `ASEappSurfaceBuilder-1.1.2-macOS.dmg`（macOS 上で再ビルドした場合）
+- Windows 単体 launcher: `ASEappSurfaceBuilder-1.2.0-Windows.exe`
+- Windows ZIP: `ASEappSurfaceBuilder-1.2.0-Windows.zip`
+- Linux: `ASEappSurfaceBuilder-1.2.0-Linux.tar.gz`
+- macOS: `ASEappSurfaceBuilder-1.2.0-macOS.dmg`（macOS 上で再ビルドした場合）
 
 配布物はローカルでは `standalone_exe/` や `code/native_ui/dist/` に生成します。確認済みの最終成果物だけを `standalone_exe/<platform>/` に置き、途中生成物はコミットしません。
 
@@ -70,10 +71,10 @@ powershell -ExecutionPolicy Bypass -File code/native_ui/package_windows_launcher
 `package_windows_launcher.ps1` は、既定で次を作成します。
 
 ```text
-standalone_exe/windows/ASEappSurfaceBuilder-1.1.2-Windows.exe
+standalone_exe/windows/ASEappSurfaceBuilder-1.2.0-Windows.exe
 ```
 
-現在このリポジトリに同梱している Windows 版は `standalone_exe/windows/ASEappSurfaceBuilder-1.1.2-Windows.exe` です。互換確認用として `standalone_exe/windows/ASEappSurfaceBuilder-1.1.1-Windows.exe`、`standalone_exe/windows/ASEappSurfaceBuilder-1.1.0-Windows.exe`、`standalone_exe/windows/ASEappSurfaceBuilder-1.0.0-Windows.exe` も残しています。
+現在このリポジトリに同梱している Windows 版は `standalone_exe/windows/ASEappSurfaceBuilder-1.2.0-Windows.exe` です。互換確認用として `standalone_exe/windows/ASEappSurfaceBuilder-1.1.2-Windows.exe`、`standalone_exe/windows/ASEappSurfaceBuilder-1.1.1-Windows.exe`、`standalone_exe/windows/ASEappSurfaceBuilder-1.1.0-Windows.exe`、`standalone_exe/windows/ASEappSurfaceBuilder-1.0.0-Windows.exe` も残しています。
 
 ### ローカル署名（開発確認用）
 
@@ -96,7 +97,7 @@ powershell -ExecutionPolicy Bypass -File code/native_ui/package_windows_launcher
 ## 展開版を確認する
 
 ```powershell
-$zip = (Resolve-Path 'code/native_ui/dist/ASEappSurfaceBuilder-1.1.2-Windows.zip').Path
+$zip = (Resolve-Path 'code/native_ui/dist/ASEappSurfaceBuilder-1.2.0-Windows.zip').Path
 $target = Join-Path $env:TEMP 'aseapp_surface_builder_verify'
 if (Test-Path $target) { Remove-Item -LiteralPath $target -Recurse -Force }
 Expand-Archive -LiteralPath $zip -DestinationPath $target -Force

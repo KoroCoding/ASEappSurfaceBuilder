@@ -2,6 +2,7 @@
 #include "ElementStyle.h"
 
 #include <QEvent>
+#include <QLinearGradient>
 #include <QMouseEvent>
 #include <QNativeGestureEvent>
 #include <QPainter>
@@ -15,10 +16,71 @@
 #include <algorithm>
 #include <array>
 #include <cmath>
+#include <cstdint>
 #include <iterator>
 #include <limits>
 
 namespace {
+constexpr double kAtomRadiusSceneFactor = 0.50;
+constexpr double kAtomRadiusPixelFloorFactor = 6.8;
+constexpr double kAtomRadiusPixelFloorMin = 5.0;
+constexpr double kAtomRadiusPixelFloorMax = 13.0;
+// Some symmetry-expanded CIFs contain almost duplicated sites when an input
+// coordinate is close to a special position. Those sub-angstrom artifacts must
+// not shrink all atoms or become visible bonds.
+constexpr double kMinimumPhysicalAtomDistance = 0.50;
+constexpr double kBondWidthPixels = 2.8;
+constexpr double kPreviewBondWidthPixels = 2.4;
+
+struct SpatialCellKey {
+    int x = 0;
+    int y = 0;
+    int z = 0;
+
+    bool operator==(const SpatialCellKey& other) const noexcept {
+        return x == other.x && y == other.y && z == other.z;
+    }
+};
+
+struct AtomImageKey {
+    int atom = -1;
+    int imageA = 0;
+    int imageB = 0;
+    int imageC = 0;
+
+    bool operator==(const AtomImageKey& other) const noexcept {
+        return atom == other.atom
+            && imageA == other.imageA
+            && imageB == other.imageB
+            && imageC == other.imageC;
+    }
+};
+
+size_t qHash(const SpatialCellKey& key, size_t seed = 0) noexcept {
+    std::uint64_t hash = static_cast<std::uint64_t>(seed) ^ 1469598103934665603ull;
+    const auto mix = [&hash](int value) {
+        hash ^= static_cast<std::uint32_t>(value);
+        hash *= 1099511628211ull;
+    };
+    mix(key.x);
+    mix(key.y);
+    mix(key.z);
+    return static_cast<size_t>(hash);
+}
+
+size_t qHash(const AtomImageKey& key, size_t seed = 0) noexcept {
+    std::uint64_t hash = static_cast<std::uint64_t>(seed) ^ 1469598103934665603ull;
+    const auto mix = [&hash](int value) {
+        hash ^= static_cast<std::uint32_t>(value);
+        hash *= 1099511628211ull;
+    };
+    mix(key.atom);
+    mix(key.imageA);
+    mix(key.imageB);
+    mix(key.imageC);
+    return static_cast<size_t>(hash);
+}
+
 QVector3D cellPoint(const std::array<QVector3D, 3>& vectors, int mask) {
     QVector3D point;
     if (mask & 1) point += vectors[0];
@@ -27,8 +89,39 @@ QVector3D cellPoint(const std::array<QVector3D, 3>& vectors, int mask) {
     return point;
 }
 
+QVector3D cellTranslation(const std::array<QVector3D, 3>& vectors, int imageA, int imageB, int imageC) {
+    return vectors[0] * static_cast<float>(imageA)
+        + vectors[1] * static_cast<float>(imageB)
+        + vectors[2] * static_cast<float>(imageC);
+}
+
+bool hasNonDegenerateCell(const std::array<QVector3D, 3>& vectors) {
+    const double volume = std::abs(static_cast<double>(QVector3D::dotProduct(
+        vectors[0],
+        QVector3D::crossProduct(vectors[1], vectors[2]))));
+    return volume > 1.0e-8;
+}
+
+bool fractionalInsideUnitCell(const QVector3D& fractional) {
+    constexpr double kCellBoundaryTolerance = 1.0e-6;
+    return fractional.x() >= -kCellBoundaryTolerance && fractional.x() <= 1.0 + kCellBoundaryTolerance
+        && fractional.y() >= -kCellBoundaryTolerance && fractional.y() <= 1.0 + kCellBoundaryTolerance
+        && fractional.z() >= -kCellBoundaryTolerance && fractional.z() <= 1.0 + kCellBoundaryTolerance;
+}
+
+bool shouldDisplayAtom(
+    const NativeAtom& atom,
+    const StructureCanvas::DisplayOptions& options,
+    const std::array<QVector3D, 3>& cell)
+{
+    if (options.showOutsideCell || !hasNonDegenerateCell(cell)) {
+        return true;
+    }
+    return fractionalInsideUnitCell(atom.fractional);
+}
+
 double visualAtomRadius(const NativeAtom& atom, double atomScale, double densityScale) {
-    return atom.radius * 0.46 * atomScale * densityScale;
+    return atom.radius * kAtomRadiusSceneFactor * atomScale * densityScale;
 }
 
 double atomRadiusDensityScale(double sceneScale, double atomScale, double nearestDistance, double maxAtomRadius) {
@@ -41,7 +134,7 @@ double atomRadiusDensityScale(double sceneScale, double atomScale, double neares
         return 1.0;
     }
 
-    const double naturalMaxRadius = maxAtomRadius * sceneScale * 0.46 * atomScale;
+    const double naturalMaxRadius = maxAtomRadius * sceneScale * kAtomRadiusSceneFactor * atomScale;
     if (naturalMaxRadius <= 1.0e-8) {
         return 1.0;
     }
@@ -52,9 +145,15 @@ double atomRadiusDensityScale(double sceneScale, double atomScale, double neares
 
 double screenAtomRadius(const NativeAtom& atom, double scale, double perspective, double atomScale, double densityScale) {
     const double styledRadius = std::max(0.05, atom.radius);
-    const double projectedRadius = styledRadius * scale * perspective * 0.46 * atomScale * densityScale;
-    const double antialiasFloor = styledRadius * 0.22 * atomScale * densityScale;
-    return std::max(projectedRadius, antialiasFloor);
+    const double projectedRadius = styledRadius * scale * perspective * kAtomRadiusSceneFactor * atomScale * densityScale;
+    // Very large CIF cells can make the physical projection smaller than the
+    // fixed-width bonds. Keep a screen-space floor so atoms remain legible while
+    // preserving the world-space radius used to trim bond endpoints.
+    const double readablePixelFloor = std::clamp(
+        styledRadius * kAtomRadiusPixelFloorFactor * atomScale,
+        kAtomRadiusPixelFloorMin,
+        kAtomRadiusPixelFloorMax);
+    return std::max(projectedRadius, readablePixelFloor);
 }
 
 double hitAtomRadius(const NativeAtom& atom, double scale, double perspective, double atomScale, double densityScale) {
@@ -62,6 +161,9 @@ double hitAtomRadius(const NativeAtom& atom, double scale, double perspective, d
 }
 
 bool distanceInRange(double distance, const BondDistanceRange& range) {
+    if (distance < kMinimumPhysicalAtomDistance) {
+        return false;
+    }
     return distance >= range.minDistance - 1.0e-9 && distance <= range.maxDistance + 1.0e-9;
 }
 
@@ -92,19 +194,11 @@ bool effectiveBondRange(
     return vestaBondDistanceRange(elementA, elementB, range);
 }
 
-QString gridKey(int x, int y, int z) {
-    return QStringLiteral("%1|%2|%3").arg(x).arg(y).arg(z);
-}
-
-std::array<int, 3> spatialCellIndex(const QVector3D& point, double cellSize) {
-    return std::array<int, 3>{
+SpatialCellKey spatialCellIndex(const QVector3D& point, double cellSize) {
+    return SpatialCellKey{
         static_cast<int>(std::floor(point.x() / cellSize)),
         static_cast<int>(std::floor(point.y() / cellSize)),
         static_cast<int>(std::floor(point.z() / cellSize))};
-}
-
-QString gridKey(const std::array<int, 3>& cell) {
-    return gridKey(cell[0], cell[1], cell[2]);
 }
 
 double typicalNearestNeighborDistance(const std::vector<NativeAtom>& atoms, double cellSize) {
@@ -112,11 +206,11 @@ double typicalNearestNeighborDistance(const std::vector<NativeAtom>& atoms, doub
         return 0.0;
     }
 
-    QHash<QString, std::vector<int>> grid;
+    QHash<SpatialCellKey, std::vector<int>> grid;
     grid.reserve(atoms.size());
     std::vector<double> nearestDistanceByAtom(atoms.size(), std::numeric_limits<double>::infinity());
     const auto recordNearestDistance = [&](int atomA, int atomB, double distance) {
-        if (distance <= 1.0e-6) {
+        if (distance < kMinimumPhysicalAtomDistance) {
             return;
         }
         auto& nearestA = nearestDistanceByAtom[static_cast<std::size_t>(atomA)];
@@ -130,8 +224,8 @@ double typicalNearestNeighborDistance(const std::vector<NativeAtom>& atoms, doub
         for (int dx = -1; dx <= 1; ++dx) {
             for (int dy = -1; dy <= 1; ++dy) {
                 for (int dz = -1; dz <= 1; ++dz) {
-                    const std::array<int, 3> neighbor{base[0] + dx, base[1] + dy, base[2] + dz};
-                    const auto it = grid.constFind(gridKey(neighbor));
+                    const SpatialCellKey neighbor{base.x + dx, base.y + dy, base.z + dz};
+                    const auto it = grid.constFind(neighbor);
                     if (it == grid.cend()) {
                         continue;
                     }
@@ -143,7 +237,7 @@ double typicalNearestNeighborDistance(const std::vector<NativeAtom>& atoms, doub
                 }
             }
         }
-        grid[gridKey(base)].push_back(i);
+        grid[base].push_back(i);
     }
 
     std::vector<double> finiteNearestDistances;
@@ -173,6 +267,7 @@ StructureCanvas::StructureCanvas(QWidget* parent) : QWidget(parent) {
 
 void StructureCanvas::setDisplayOptions(const DisplayOptions& options) {
     const bool rebuildBonds = m_displayOptions.showBonds != options.showBonds
+        || m_displayOptions.showOutsideCell != options.showOutsideCell
         || m_displayOptions.customBondRanges != options.customBondRanges;
     m_displayOptions = options;
     if (rebuildBonds) {
@@ -449,11 +544,50 @@ void StructureCanvas::rotateBasisFromDrag(const QPoint& delta) {
 
 void StructureCanvas::rebuildSceneCache() {
     m_cachedBonds.clear();
+    m_cachedAtomImages.clear();
     m_cachedCenter = {};
     m_cachedRadius = 1.0;
     m_cachedNearestAtomDistance = 0.0;
     m_cachedMaxAtomRadius = 1.0;
-    if (m_structure.atoms.empty()) {
+
+    m_cachedBonds = buildBondPairs();
+
+    QHash<AtomImageKey, bool> atomImages;
+    atomImages.reserve(static_cast<int>(m_structure.atoms.size() + m_cachedBonds.size()));
+    const auto addAtomImage = [&](int atomIndex, int imageA, int imageB, int imageC, const QVector3D& shift) {
+        if (atomIndex < 0 || atomIndex >= static_cast<int>(m_structure.atoms.size())) {
+            return;
+        }
+        const AtomImageKey key{atomIndex, imageA, imageB, imageC};
+        if (atomImages.constFind(key) != atomImages.cend()) {
+            return;
+        }
+        atomImages.insert(key, true);
+        m_cachedAtomImages.push_back({atomIndex, imageA, imageB, imageC, shift});
+    };
+
+    for (int i = 0; i < static_cast<int>(m_structure.atoms.size()); ++i) {
+        if (shouldDisplayAtom(m_structure.atoms[static_cast<std::size_t>(i)], m_displayOptions, m_structure.cellVectors)) {
+            addAtomImage(i, 0, 0, 0, {});
+        }
+    }
+    for (const auto& bond : m_cachedBonds) {
+        addAtomImage(bond.atomA, 0, 0, 0, {});
+        addAtomImage(bond.atomB, bond.imageA, bond.imageB, bond.imageC, bond.shiftB);
+    }
+
+    std::vector<NativeAtom> visibleAtoms;
+    visibleAtoms.reserve(m_cachedAtomImages.size());
+    for (const auto& image : m_cachedAtomImages) {
+        if (image.atom < 0 || image.atom >= static_cast<int>(m_structure.atoms.size())) {
+            continue;
+        }
+        NativeAtom atom = m_structure.atoms[static_cast<std::size_t>(image.atom)];
+        atom.cartesian += image.shift;
+        visibleAtoms.push_back(atom);
+    }
+
+    if (visibleAtoms.empty()) {
         m_cachedCenter = (m_structure.cellVectors[0] + m_structure.cellVectors[1] + m_structure.cellVectors[2]) * 0.5f;
         for (int mask = 0; mask < 8; ++mask) {
             m_cachedRadius = std::max(
@@ -463,24 +597,22 @@ void StructureCanvas::rebuildSceneCache() {
         return;
     }
     m_cachedMaxAtomRadius = 0.05;
-    for (const auto& atom : m_structure.atoms) {
+    for (const auto& atom : visibleAtoms) {
         m_cachedCenter += atom.cartesian;
         m_cachedMaxAtomRadius = std::max(m_cachedMaxAtomRadius, std::max(0.05, atom.radius));
     }
-    m_cachedCenter /= static_cast<float>(m_structure.atoms.size());
-    for (const auto& atom : m_structure.atoms) {
+    m_cachedCenter /= static_cast<float>(visibleAtoms.size());
+    for (const auto& atom : visibleAtoms) {
         m_cachedRadius = std::max(m_cachedRadius, static_cast<double>((atom.cartesian - m_cachedCenter).length()));
     }
-    for (int mask = 0; mask < 8; ++mask) {
-        m_cachedRadius = std::max(
-            m_cachedRadius,
-            static_cast<double>((cellPoint(m_structure.cellVectors, mask) - m_cachedCenter).length()));
-    }
+    // VESTA fits the visible model, not the entire crystallographic cell box.
+    // Keeping all cell corners in the fit radius zoomed large unit cells out
+    // too far and made atoms look much smaller than VESTA's ball-and-stick view.
+    m_cachedRadius += m_cachedMaxAtomRadius * kAtomRadiusSceneFactor;
     const double neighborCellSize = std::max(
         0.5,
         maximumBondCutoffWithCustomRanges(m_displayOptions.customBondRanges));
-    m_cachedNearestAtomDistance = typicalNearestNeighborDistance(m_structure.atoms, neighborCellSize);
-    m_cachedBonds = buildBondPairs();
+    m_cachedNearestAtomDistance = typicalNearestNeighborDistance(visibleAtoms, neighborCellSize);
 }
 
 std::vector<StructureCanvas::BondSegment> StructureCanvas::buildBondPairs() const {
@@ -492,39 +624,84 @@ std::vector<StructureCanvas::BondSegment> StructureCanvas::buildBondPairs() cons
         return bonds;
     }
     const auto& atoms = m_structure.atoms;
+    const bool usePeriodicImages = m_displayOptions.showOutsideCell && hasNonDegenerateCell(m_structure.cellVectors);
+    const int minImage = usePeriodicImages ? -1 : 0;
+    const int maxImage = usePeriodicImages ? 1 : 0;
     const double cellSize = std::max(0.5, maximumBondCutoffWithCustomRanges(m_displayOptions.customBondRanges));
-    QHash<QString, std::vector<int>> grid;
-    grid.reserve(atoms.size());
+
+    struct BondCandidate {
+        int atom = -1;
+        int imageA = 0;
+        int imageB = 0;
+        int imageC = 0;
+        QVector3D shift;
+        QVector3D cartesian;
+    };
+
+    std::vector<BondCandidate> candidates;
+    candidates.reserve(atoms.size() * static_cast<std::size_t>(usePeriodicImages ? 27 : 1));
+    QHash<SpatialCellKey, std::vector<int>> grid;
+    grid.reserve(static_cast<int>(atoms.size() * static_cast<std::size_t>(usePeriodicImages ? 27 : 1)));
+
+    for (int j = 0; j < static_cast<int>(atoms.size()); ++j) {
+        const auto& atom = atoms[static_cast<std::size_t>(j)];
+        if (!shouldDisplayAtom(atom, m_displayOptions, m_structure.cellVectors)) {
+            continue;
+        }
+        for (int imageA = minImage; imageA <= maxImage; ++imageA) {
+            for (int imageB = minImage; imageB <= maxImage; ++imageB) {
+                for (int imageC = minImage; imageC <= maxImage; ++imageC) {
+                    const QVector3D shift = cellTranslation(m_structure.cellVectors, imageA, imageB, imageC);
+                    const QVector3D cartesian = atom.cartesian + shift;
+                    const int candidateIndex = static_cast<int>(candidates.size());
+                    candidates.push_back({j, imageA, imageB, imageC, shift, cartesian});
+                    grid[spatialCellIndex(cartesian, cellSize)].push_back(candidateIndex);
+                }
+            }
+        }
+    }
 
     for (int i = 0; i < static_cast<int>(atoms.size()); ++i) {
-        const auto base = spatialCellIndex(atoms[static_cast<std::size_t>(i)].cartesian, cellSize);
+        const auto& a = atoms[static_cast<std::size_t>(i)];
+        if (!shouldDisplayAtom(a, m_displayOptions, m_structure.cellVectors)) {
+            continue;
+        }
+        const auto base = spatialCellIndex(a.cartesian, cellSize);
         for (int dx = -1; dx <= 1; ++dx) {
             for (int dy = -1; dy <= 1; ++dy) {
                 for (int dz = -1; dz <= 1; ++dz) {
-                    const std::array<int, 3> neighbor{base[0] + dx, base[1] + dy, base[2] + dz};
-                    const auto it = grid.constFind(gridKey(neighbor));
+                    const SpatialCellKey neighbor{base.x + dx, base.y + dy, base.z + dz};
+                    const auto it = grid.constFind(neighbor);
                     if (it == grid.cend()) {
                         continue;
                     }
-                    for (int j : it.value()) {
-                        BondDistanceRange range;
-                        if (!effectiveBondRange(
-                                m_displayOptions.customBondRanges,
-                                atoms[static_cast<std::size_t>(i)].element,
-                                atoms[static_cast<std::size_t>(j)].element,
-                                &range)) {
+                    for (int candidateIndex : it.value()) {
+                        const auto& candidate = candidates[static_cast<std::size_t>(candidateIndex)];
+                        const bool primaryImage = candidate.imageA == 0 && candidate.imageB == 0 && candidate.imageC == 0;
+                        if (primaryImage && candidate.atom <= i) {
                             continue;
                         }
-                        const QVector3D diff = atoms[static_cast<std::size_t>(j)].cartesian - atoms[static_cast<std::size_t>(i)].cartesian;
+                        const auto& b = atoms[static_cast<std::size_t>(candidate.atom)];
+                        BondDistanceRange range;
+                        if (!effectiveBondRange(m_displayOptions.customBondRanges, a.element, b.element, &range)) {
+                            continue;
+                        }
+                        const QVector3D diff = candidate.cartesian - a.cartesian;
                         const double dist = diff.length();
                         if (distanceInRange(dist, range)) {
-                            bonds.push_back({j, i, {}, dist});
+                            bonds.push_back({
+                                i,
+                                candidate.atom,
+                                candidate.imageA,
+                                candidate.imageB,
+                                candidate.imageC,
+                                candidate.shift,
+                                dist});
                         }
                     }
                 }
             }
         }
-        grid[gridKey(base)].push_back(i);
     }
     return bonds;
 }
@@ -553,11 +730,16 @@ std::vector<int> StructureCanvas::pickAtomsAt(const QPoint& pos) const {
         double distance = 0.0;
     };
     std::vector<Candidate> candidates;
-    candidates.reserve(m_structure.atoms.size());
-    for (const auto& atom : m_structure.atoms) {
-        const auto rotated = rotatePoint(atom.cartesian - center);
+    candidates.reserve(m_cachedAtomImages.size());
+    for (const auto& image : m_cachedAtomImages) {
+        if (image.atom < 0 || image.atom >= static_cast<int>(m_structure.atoms.size())) {
+            continue;
+        }
+        const auto& atom = m_structure.atoms[static_cast<std::size_t>(image.atom)];
+        const QVector3D cartesian = atom.cartesian + image.shift;
+        const auto rotated = rotatePoint(cartesian - center);
         const double perspective = depthPerspective(rotated.z());
-        const QPointF point = projectPoint(atom.cartesian - center, viewport, scale);
+        const QPointF point = projectPoint(cartesian - center, viewport, scale);
         const double radius = hitAtomRadius(atom, scale, perspective, m_displayOptions.atomScale, densityScale);
         const double distance = QLineF(point, pos).length();
         if (distance > radius + 6.0) {
@@ -582,6 +764,9 @@ std::vector<int> StructureCanvas::pickAtomsAt(const QPoint& pos) const {
     std::vector<int> atomIds;
     atomIds.reserve(candidates.size());
     for (const auto& candidate : candidates) {
+        if (std::find(atomIds.begin(), atomIds.end(), candidate.atomId) != atomIds.end()) {
+            continue;
+        }
         atomIds.push_back(candidate.atomId);
     }
     return atomIds;
@@ -656,6 +841,8 @@ void StructureCanvas::paintEvent(QPaintEvent*) {
         QPointF a;
         QPointF b;
         double depth;
+        QColor colorA;
+        QColor colorB;
         bool preview;
     };
 
@@ -672,7 +859,7 @@ void StructureCanvas::paintEvent(QPaintEvent*) {
             const auto& a = m_structure.atoms[static_cast<std::size_t>(bond.atomA)];
             const auto& b = m_structure.atoms[static_cast<std::size_t>(bond.atomB)];
             const QVector3D aCart = a.cartesian - center;
-            const QVector3D bCart = b.cartesian - center;
+            const QVector3D bCart = b.cartesian + bond.shiftB - center;
             const QVector3D diff = bCart - aCart;
             const double length = static_cast<double>(diff.length());
             if (length <= 1.0e-6) {
@@ -692,6 +879,8 @@ void StructureCanvas::paintEvent(QPaintEvent*) {
                 projectPoint(aEdge, viewport, scale),
                 projectPoint(bEdge, viewport, scale),
                 (aRot.z() + bRot.z()) * 0.5 - 0.35,
+                a.color,
+                b.color,
                 false
             });
         }
@@ -699,6 +888,10 @@ void StructureCanvas::paintEvent(QPaintEvent*) {
             for (int j = i + 1; j < static_cast<int>(m_previewAtoms.size()); ++j) {
                 const auto& a = m_previewAtoms[static_cast<std::size_t>(i)];
                 const auto& b = m_previewAtoms[static_cast<std::size_t>(j)];
+                if (!shouldDisplayAtom(a, m_displayOptions, m_structure.cellVectors)
+                    || !shouldDisplayAtom(b, m_displayOptions, m_structure.cellVectors)) {
+                    continue;
+                }
                 BondDistanceRange range;
                 if (!effectiveBondRange(m_displayOptions.customBondRanges, a.element, b.element, &range)) {
                     range = BondDistanceRange{0.0, (vestaElementRadius(a.element) + vestaElementRadius(b.element)) * 0.85};
@@ -723,6 +916,8 @@ void StructureCanvas::paintEvent(QPaintEvent*) {
                     projectPoint(aEdge, viewport, scale),
                     projectPoint(bEdge, viewport, scale),
                     (aRot.z() + bRot.z()) * 0.5 - 0.35,
+                    QColor("#2D7FF9"),
+                    QColor("#2D7FF9"),
                     true
                 });
             }
@@ -730,17 +925,23 @@ void StructureCanvas::paintEvent(QPaintEvent*) {
     }
 
     std::vector<PaintedAtom> paintAtoms;
-    paintAtoms.reserve(m_structure.atoms.size() + m_previewAtoms.size());
-    for (const auto& atom : m_structure.atoms) {
-        const auto rotated = rotatePoint(atom.cartesian - center);
+    paintAtoms.reserve(m_cachedAtomImages.size() + m_previewAtoms.size());
+    for (const auto& image : m_cachedAtomImages) {
+        if (image.atom < 0 || image.atom >= static_cast<int>(m_structure.atoms.size())) {
+            continue;
+        }
+        const auto& atom = m_structure.atoms[static_cast<std::size_t>(image.atom)];
+        const QVector3D cartesian = atom.cartesian + image.shift;
+        const auto rotated = rotatePoint(cartesian - center);
         const auto selectedIt = std::find(m_selectedAtomIds.begin(), m_selectedAtomIds.end(), atom.atomId);
-        const bool selected = selectedIt != m_selectedAtomIds.end();
+        const bool primaryImage = image.imageA == 0 && image.imageB == 0 && image.imageC == 0;
+        const bool selected = primaryImage && selectedIt != m_selectedAtomIds.end();
         paintAtoms.push_back({
-            projectPoint(atom.cartesian - center, viewport, scale),
+            projectPoint(cartesian - center, viewport, scale),
             rotated.z(),
             screenAtomRadius(atom, scale, depthPerspective(rotated.z()), m_displayOptions.atomScale, densityScale),
             atom.color,
-            atom.atomId == m_focusAtomId,
+            primaryImage && atom.atomId == m_focusAtomId,
             selected,
             false,
             atom.atomId,
@@ -751,6 +952,9 @@ void StructureCanvas::paintEvent(QPaintEvent*) {
         });
     }
     for (const auto& atom : m_previewAtoms) {
+        if (!shouldDisplayAtom(atom, m_displayOptions, m_structure.cellVectors)) {
+            continue;
+        }
         const auto rotated = rotatePoint(atom.cartesian - center);
         QColor previewColor = atom.color.isValid() ? atom.color : QColor("#2D7FF9");
         previewColor.setAlpha(105);
@@ -804,18 +1008,26 @@ void StructureCanvas::paintEvent(QPaintEvent*) {
         if (bond.preview) {
             QColor bondColor("#2D7FF9");
             bondColor.setAlpha(150);
-            painter.setPen(QPen(bondColor, 2.0, Qt::DashLine));
+            painter.setPen(QPen(bondColor, kPreviewBondWidthPixels, Qt::DashLine));
             painter.drawLine(bond.a, bond.b);
             return;
         }
+        QColor colorA = bond.colorA.isValid() ? bond.colorA : QColor("#707070");
+        QColor colorB = bond.colorB.isValid() ? bond.colorB : QColor("#707070");
         if (m_displayOptions.depthCue) {
-            QColor bondColor("#707070");
             const int alpha = static_cast<int>(std::clamp(140.0 + bond.depth * 8.0, 90.0, 220.0));
-            bondColor.setAlpha(alpha);
-            painter.setPen(QPen(bondColor, 2.0));
+            colorA.setAlpha(alpha);
+            colorB.setAlpha(alpha);
         } else {
-            painter.setPen(QPen(QColor("#707070"), 2.0));
+            colorA.setAlpha(255);
+            colorB.setAlpha(255);
         }
+        QLinearGradient gradient(bond.a, bond.b);
+        gradient.setColorAt(0.0, colorA);
+        gradient.setColorAt(0.499, colorA);
+        gradient.setColorAt(0.501, colorB);
+        gradient.setColorAt(1.0, colorB);
+        painter.setPen(QPen(QBrush(gradient), kBondWidthPixels, Qt::SolidLine, Qt::FlatCap));
         painter.drawLine(bond.a, bond.b);
     };
 
@@ -1008,12 +1220,16 @@ void StructureCanvas::addAtomsInCtrlSelectionRect() {
         double depth = 0.0;
     };
     std::vector<Candidate> candidates;
-    candidates.reserve(m_structure.atoms.size());
-    for (const auto& atom : m_structure.atoms) {
+    candidates.reserve(m_cachedAtomImages.size());
+    for (const auto& image : m_cachedAtomImages) {
+        if (image.atom < 0 || image.atom >= static_cast<int>(m_structure.atoms.size())) {
+            continue;
+        }
+        const auto& atom = m_structure.atoms[static_cast<std::size_t>(image.atom)];
         if (isAtomSelected(atom.atomId)) {
             continue;
         }
-        const QVector3D local = atom.cartesian - center;
+        const QVector3D local = atom.cartesian + image.shift - center;
         const auto rotated = rotatePoint(local);
         const double perspective = depthPerspective(rotated.z());
         const QPointF point = projectPoint(local, viewport, scale);
@@ -1030,7 +1246,16 @@ void StructureCanvas::addAtomsInCtrlSelectionRect() {
         }
         return a.atomId < b.atomId;
     });
+    std::vector<int> emittedAtomIds;
+    emittedAtomIds.reserve(candidates.size());
     for (const auto& candidate : candidates) {
+        if (isAtomSelected(candidate.atomId)) {
+            continue;
+        }
+        if (std::find(emittedAtomIds.begin(), emittedAtomIds.end(), candidate.atomId) != emittedAtomIds.end()) {
+            continue;
+        }
+        emittedAtomIds.push_back(candidate.atomId);
         emit atomActivated(candidate.atomId);
     }
 }

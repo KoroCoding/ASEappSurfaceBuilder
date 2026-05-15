@@ -4,6 +4,20 @@ ASEapp Surface Builder CHANGELOG
 Unreleased
 ----------
 
+Version 1.2.0 - VESTA-like display and startup polish
+------------------------------------------------------
+- Added a side preview to the Atom legend PNG export dialog, plus label prefix/suffix fields and manual element-order controls.
+- Cached the extracted standalone payload under the user's local app-data folder using an embedded-payload hash, so repeat launches skip the slow ZIP extraction path.
+- Replaced string-formatted spatial grid keys in atom-neighbor searches with compact integer keys to reduce allocation overhead for larger structures.
+- Added an immediate standalone-launcher splash screen that stays visible during embedded ZIP extraction and fades out when the native UI starts.
+- Increased the VESTA-like bond stroke width while keeping one-piece, constant-width two-color bond rendering.
+- Ignored sub-0.50 A symmetry near-overlap artifacts for display density and bond rendering so the magnemite CIF keeps normal atom sizes.
+- Adjusted the default ball-and-stick atom scale and fit radius to match VESTA more closely; the initial fit now prioritizes visible atoms instead of forcing the full cell box on screen.
+- Changed normal bonds to VESTA-style half-and-half coloring using the colors of the atoms at each end.
+- Added the Outside cell toggle to show/hide VESTA-like periodic image atoms and bonds crossing the unit-cell boundary.
+- Added a GUI self-test assertion that the Outside cell toggle adds periodic boundary bonds.
+- Regenerated the verified Windows standalone launcher as v1.2.0.
+
 Version 1.1.2 - Refactor and verified Windows rebuild
 ------------------------------------------------------
 - 起動時の Qt plugin path 設定を AppStartup に分離し、main.cpp を起動フローへ集中させました。
