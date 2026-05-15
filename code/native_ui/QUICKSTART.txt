@@ -5,6 +5,7 @@ ASEapp Surface Builder クイックスタート
 ------
 - 単体版: ASEappSurfaceBuilder-1.2.0-Windows.exe を実行します。
 - 展開版: bin\ASEappNativeUI.exe を実行します。
+- macOS DMG 版: ASEappNativeUI.app を Applications へドラッグし、右クリックまたは Control + クリックで「開く」を選びます。
 
 2. 構造を開く
 ------------
@@ -74,4 +75,4 @@ ASEapp Surface Builder クイックスタート
 - Save で POSCAR / extended XYZ / 通常 XYZ 形式として保存します。
 - POSCAR は Direct / Cartesian、通常 XYZ は Cartesian / 分率座標を選択できます。
 - 重要な構造は、編集前に別名保存しておくと安全です。
-- Atom legend PNG: use the side preview, Prefix/Suffix fields, and Display order list to adjust labels before saving.
+- 原子一覧PNGは、横プレビュー、Prefix/Suffix、表示順リストを確認してから保存します。

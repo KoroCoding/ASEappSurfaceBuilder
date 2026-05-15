@@ -10,7 +10,7 @@
 
 | やりたいこと | 最短ルート |
 | --- | --- |
-| アプリを起動したい | 同梱 Windows 版 [`standalone_exe/windows/ASEappSurfaceBuilder-1.2.0-Windows.exe`](standalone_exe/windows/ASEappSurfaceBuilder-1.2.0-Windows.exe) を実行 |
+| アプリを起動したい | Windows は [`standalone_exe/windows/ASEappSurfaceBuilder-1.2.0-Windows.exe`](standalone_exe/windows/ASEappSurfaceBuilder-1.2.0-Windows.exe)、macOS は [`standalone_exe/macos/ASEappSurfaceBuilder-1.2.0-macOS.dmg`](standalone_exe/macos/ASEappSurfaceBuilder-1.2.0-macOS.dmg) を使用 |
 | 画面を見ながら使い方を知りたい | [操作ガイド `Guide.md`](Guide.md) を開く |
 | 自分でビルドしたい | [ソースからビルド](#ソースからビルド) を実行 |
 | 配布物を作り直したい | [`PACKAGING.md`](PACKAGING.md) を参照 |
@@ -50,7 +50,7 @@
 | OS | 推奨 | 備考 |
 | --- | --- | --- |
 | Windows | [`standalone_exe/windows/ASEappSurfaceBuilder-1.2.0-Windows.exe`](standalone_exe/windows/ASEappSurfaceBuilder-1.2.0-Windows.exe) | 現在同梱している Windows 版は v1.2.0 です。互換確認用として v1.1.2 / v1.1.1 / v1.1.0 / v1.0.0 も同じフォルダに残しています。 |
-| macOS | [`standalone_exe/macos/ASEappSurfaceBuilder-1.1.0-macOS.dmg`](standalone_exe/macos/ASEappSurfaceBuilder-1.1.0-macOS.dmg) | v1.0.0 の DMG も [`standalone_exe/macos/`](standalone_exe/macos/) に残しています。 |
+| macOS | [`standalone_exe/macos/ASEappSurfaceBuilder-1.2.0-macOS.dmg`](standalone_exe/macos/ASEappSurfaceBuilder-1.2.0-macOS.dmg) | 現在同梱している macOS 版は v1.2.0 です。互換確認用として v1.1.0 / v1.0.0 も同じフォルダに残しています。 |
 | Linux | ソースからビルド | Qt 6 と CMake が必要です。 |
 
 ### Windows: 同梱 EXE を起動
@@ -59,9 +59,9 @@
 
 ### macOS
 
-最新の macOS 版は `standalone_exe/macos/ASEappSurfaceBuilder-1.1.0-macOS.dmg` です。過去版として `ASEappSurfaceBuilder-1.0.0-macOS.dmg` も同じフォルダに残しています。
+最新の macOS 版は `standalone_exe/macos/ASEappSurfaceBuilder-1.2.0-macOS.dmg` です。過去版として `ASEappSurfaceBuilder-1.1.0-macOS.dmg` と `ASEappSurfaceBuilder-1.0.0-macOS.dmg` も同じフォルダに残しています。
 
-macOS の `.dmg` 作成・署名・notarization の考え方は [`PACKAGING.md`](PACKAGING.md) に分けています。
+DMG には `ASEappNativeUI.app`、Applications へのリンク、自己署名証明書、初回起動補助用の `ASEapp-macOS-Allow-This-App.command`、macOS 向け README を含めています。Developer ID + Notarization ではない自己署名版なので、初回起動時に Gatekeeper の警告が出る場合があります。macOS の `.dmg` 作成・署名・notarization の考え方は [`PACKAGING.md`](PACKAGING.md) に分けています。
 
 ## ソースからビルド
 

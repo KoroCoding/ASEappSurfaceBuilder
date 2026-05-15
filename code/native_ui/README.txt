@@ -12,6 +12,10 @@ ASEapp Surface Builder
   bin\ASEappNativeUI.exe を実行します。
   bin / plugins / translations を含むフォルダ構成を崩さないでください。
 
+- macOS DMG 版を使う場合:
+  ASEappNativeUI.app を Applications へドラッグしてから、右クリックまたは Control + クリックで「開く」を選びます。
+  自己署名証明書を信頼登録して使う場合は、DMG 内の ASEapp-macOS-Allow-This-App.command を実行します。
+
 基本手順
 --------
 1. 構造ファイルをドラッグ&ドロップ、または Open で読み込みます。複数構造は既存ウィンドウ内のタブで切り替えます。2回目以降の起動では別ウィンドウを増やさず、既存ウィンドウを前面へ戻します。CIF は代表的な対称操作ループを展開して描画します。
@@ -59,9 +63,9 @@ Ctrl+W: 現在の構造タブを閉じる
 - 通常 slab では direct c と reciprocal c* が同じ向きに見えます。c 軸が ab 面法線から傾く非直交セルでは異なる視点になります。
 - 前駆体CSV形式: name,element,dx_angstrom,dy_angstrom,dz_angstrom
 - 原子一覧PNGは、論文図には 2000 px 以上または 300 dpi 以上を推奨します。
-- Qt / VC++ ランタイム DLL は配布物に同梱済みです。
+- Qt ランタイムと Windows の VC++ ランタイム DLL は配布物に同梱済みです。
 - DLL 不足エラーが出る場合は、bin 内の exe だけを単独で移動していないか確認してください。
 - "no Qt platform plugin could be initialized" が出る場合は古い配布物や bin だけの移動が原因です。単体 launcher 版を使うか、ZIP 全体を展開してください。
+- macOS の自己署名版では初回起動時に Gatekeeper の警告が出る場合があります。警告なしの配布には Developer ID + Notarization が必要です。
 
 詳しくは QUICKSTART.txt と CHANGELOG.txt も確認してください。
-- Atom legend PNG export now shows a side preview and supports label prefix/suffix plus manual element ordering.
