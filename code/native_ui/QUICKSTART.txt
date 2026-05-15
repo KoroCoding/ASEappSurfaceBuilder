@@ -72,7 +72,8 @@ ASEapp Surface Builder クイックスタート
 
 10. 保存
 ------
-- Save で POSCAR / extended XYZ / 通常 XYZ 形式として保存します。
+- Save で CIF / POSCAR / extended XYZ / 通常 XYZ 形式として保存します。
+- CIF は現在表示中の全原子とセルを P1 の構造として書き出します。
 - POSCAR は Direct / Cartesian、通常 XYZ は Cartesian / 分率座標を選択できます。
 - 重要な構造は、編集前に別名保存しておくと安全です。
 - 原子一覧PNGは、横プレビュー、Prefix/Suffix、表示順リストを確認してから保存します。

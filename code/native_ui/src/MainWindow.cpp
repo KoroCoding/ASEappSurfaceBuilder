@@ -814,9 +814,111 @@ bool writePoscarFile(const StructureData& structure,
     return true;
 }
 
+QString cifDataBlockName(QString value) {
+    value = value.trimmed();
+    if (value.isEmpty()) {
+        value = QStringLiteral("ASEapp_Surface_Builder");
+    }
+    value.replace(QRegularExpression(QStringLiteral("[^A-Za-z0-9_]+")), QStringLiteral("_"));
+    value.replace(QRegularExpression(QStringLiteral("_+")), QStringLiteral("_"));
+    value = value.trimmed();
+    if (value == QStringLiteral("_")) {
+        value = QStringLiteral("ASEapp_Surface_Builder");
+    }
+    return value;
+}
+
+QString cifAtomToken(QString value, const QString& fallback) {
+    value = value.trimmed();
+    if (value.isEmpty() || value == QStringLiteral(".") || value == QStringLiteral("?")) {
+        value = fallback;
+    }
+    value.replace(QRegularExpression(QStringLiteral("[^A-Za-z0-9_.+-]+")), QStringLiteral("_"));
+    value.replace(QRegularExpression(QStringLiteral("_+")), QStringLiteral("_"));
+    value = value.trimmed();
+    if (value.isEmpty() || value == QStringLiteral(".") || value == QStringLiteral("?")) {
+        return fallback;
+    }
+    return value;
+}
+
+double vectorAngleDegrees(const QVector3D& lhs, const QVector3D& rhs) {
+    const double lhsLength = lhs.length();
+    const double rhsLength = rhs.length();
+    if (lhsLength <= 1.0e-12 || rhsLength <= 1.0e-12) {
+        return 90.0;
+    }
+    const double cosine = std::clamp(
+        static_cast<double>(QVector3D::dotProduct(lhs, rhs)) / (lhsLength * rhsLength),
+        -1.0,
+        1.0);
+    constexpr double kRadiansToDegrees = 180.0 / 3.14159265358979323846;
+    return std::acos(cosine) * kRadiansToDegrees;
+}
+
+bool writeCifFile(const StructureData& structure, const QString& path, QString* errorMessage) {
+    QFile file(path);
+    if (!file.open(QIODevice::WriteOnly | QIODevice::Truncate | QIODevice::Text)) {
+        if (errorMessage != nullptr) {
+            *errorMessage = QStringLiteral("Failed to write %1").arg(path);
+        }
+        return false;
+    }
+
+    const QVector3D& a = structure.cellVectors[0];
+    const QVector3D& b = structure.cellVectors[1];
+    const QVector3D& c = structure.cellVectors[2];
+
+    QTextStream out(&file);
+    out.setEncoding(QStringConverter::Utf8);
+    out.setRealNumberNotation(QTextStream::FixedNotation);
+    out.setRealNumberPrecision(10);
+    out << "data_" << cifDataBlockName(structure.title) << "\n";
+    out << "_audit_creation_method 'ASEapp Surface Builder'\n";
+    out << "_symmetry_space_group_name_H-M 'P 1'\n";
+    out << "_space_group_IT_number 1\n";
+    out << "_cell_length_a " << a.length() << "\n";
+    out << "_cell_length_b " << b.length() << "\n";
+    out << "_cell_length_c " << c.length() << "\n";
+    out << "_cell_angle_alpha " << vectorAngleDegrees(b, c) << "\n";
+    out << "_cell_angle_beta " << vectorAngleDegrees(a, c) << "\n";
+    out << "_cell_angle_gamma " << vectorAngleDegrees(a, b) << "\n";
+    out << "loop_\n";
+    out << "_space_group_symop_operation_xyz\n";
+    out << "'x, y, z'\n";
+    out << "loop_\n";
+    out << "_atom_site_label\n";
+    out << "_atom_site_type_symbol\n";
+    out << "_atom_site_fract_x\n";
+    out << "_atom_site_fract_y\n";
+    out << "_atom_site_fract_z\n";
+    out << "_atom_site_Cartn_x\n";
+    out << "_atom_site_Cartn_y\n";
+    out << "_atom_site_Cartn_z\n";
+    for (const auto& atom : structure.atoms) {
+        const QString element = cifAtomToken(atom.element, QStringLiteral("X"));
+        const QString label = cifAtomToken(
+            atom.tag,
+            QStringLiteral("%1%2").arg(element).arg(atom.atomId));
+        out << label << ' '
+            << element << ' '
+            << atom.fractional.x() << ' '
+            << atom.fractional.y() << ' '
+            << atom.fractional.z() << ' '
+            << atom.cartesian.x() << ' '
+            << atom.cartesian.y() << ' '
+            << atom.cartesian.z() << '\n';
+    }
+    return true;
+}
+
 bool isXyzPath(const QString& path) {
     const QString suffix = QFileInfo(path).suffix().toLower();
     return suffix == QStringLiteral("xyz") || suffix == QStringLiteral("extxyz");
+}
+
+bool isCifPath(const QString& path) {
+    return QFileInfo(path).suffix().compare(QStringLiteral("cif"), Qt::CaseInsensitive) == 0;
 }
 
 QString extXyzEscaped(QString value) {
@@ -2096,7 +2198,8 @@ public:
             "7. セル軸傾きで、c軸などをa/b方向へ傾けてステップテラス候補を作れます。\n"
             "8. 真空層 で真空層の追加・除去、またはスラブ全体の移動を行います。真空層除去ボタンでは c軸方向をすぐ詰められます。\n"
             "9. 原子対ボンド長で、読み込まれている構造の全原子対距離を一覧し、Target Å を個別に修正できます。\n"
-            "10. 原子一覧PNG で、論文・学会用の球＋ラベル画像を解像度/DPI指定で出力します。\n\n"
+            "10. 原子一覧PNG で、論文・学会用の球＋ラベル画像を解像度/DPI指定で出力します。\n"
+            "11. 保存 で CIF / POSCAR / XYZ / extended XYZ 形式へ書き出せます。\n\n"
             "視点操作:\n"
             "・初期視点: c 方向\n"
             "・左ドラッグ: 回転\n"
@@ -2119,7 +2222,8 @@ public:
             "7. Use Axis tilt to tilt c or another cell axis toward a/b for step-terrace candidates.\n"
             "8. Use Vacuum to add/remove vacuum or move the whole slab. Remove vacuum immediately tightens the c-axis.\n"
             "9. Use Atom-pair lengths to list every atom-pair distance in the loaded structure and edit each Target Å individually.\n"
-            "10. Use Atom legend PNG to preview/export a sphere-and-label image, add label prefix/suffix text, and reorder elements before saving.\n\n"
+            "10. Use Atom legend PNG to preview/export a sphere-and-label image, add label prefix/suffix text, and reorder elements before saving.\n"
+            "11. Use Save As to write CIF / POSCAR / XYZ / extended XYZ files.\n\n"
             "View controls:\n"
             "・Initial view: c-axis\n"
             "・Left drag: rotate\n"
@@ -2166,7 +2270,7 @@ public:
             "<b>2. 吸着分子ポーズ編集</b><ul>"
             "<li>選択原子群をポーズグループ化すると、分子内相対座標を保持したまま剛体並進・pivot回転できます。</li>"
             "<li>奥行き方向は法線方向スピンボックスなどで明示指定します。通常ドラッグだけでは勝手に前後移動しません。</li>"
-            "<li>Save As またはポーズ出力から extended XYZ / pose JSON / ASE snippet を保存し、ASE 側の大量 slab 生成へ戻せます。</li>"
+            "<li>Save As から CIF / POSCAR / XYZ / extended XYZ を保存できます。ポーズ出力からは extended XYZ / pose JSON / ASE snippet を保存し、ASE 側の大量 slab 生成へ戻せます。</li>"
             "</ul>"
             "<b>3. スーパーセル/真空</b><ul>"
             "<li>Supercell で a/b/c 方向の倍率を指定します。</li>"
@@ -2200,7 +2304,7 @@ public:
             "<b>2. Adsorbate pose editor</b><ul>"
             "<li>Create a pose group from selected atoms to keep internal relative coordinates while translating and pivot-rotating the adsorbate as a rigid body.</li>"
             "<li>Depth changes are explicit through the normal-direction spin box or numeric inputs; plain dragging does not silently move the molecule forward/backward.</li>"
-            "<li>Use Save As or pose export to write extended XYZ, pose JSON, or an ASE snippet for batch slab generation.</li>"
+            "<li>Use Save As to write CIF / POSCAR / XYZ / extended XYZ files. Pose export writes extended XYZ, pose JSON, or an ASE snippet for batch slab generation.</li>"
             "</ul>"
             "<b>3. Supercell/Vacuum</b><ul>"
             "<li>Use Supercell to set repeat counts along a/b/c.</li>"
@@ -3477,11 +3581,12 @@ void MainWindow::saveStructureAs() {
     QString selectedFilter;
     QString path = QFileDialog::getSaveFileName(this, "Save structure", defaultOpenDirectory() + "/" +
         (m_structure.title.isEmpty() ? "surface_model.aseproj" : m_structure.title + ".aseproj"),
-        "ASEapp project (*.aseproj *.json);;Extended XYZ for ASE (*.extxyz *.xyz);;Plain XYZ coordinates only (*.xyz);;VASP POSCAR (*.vasp POSCAR CONTCAR *.poscar)",
+        "ASEapp project (*.aseproj *.json);;CIF crystallographic file (*.cif);;Extended XYZ for ASE (*.extxyz *.xyz);;Plain XYZ coordinates only (*.xyz);;VASP POSCAR (*.vasp POSCAR CONTCAR *.poscar)",
         &selectedFilter);
     if (path.isEmpty()) return;
 
     const bool selectedProject = selectedFilter.contains(QStringLiteral("ASEapp project"), Qt::CaseInsensitive);
+    const bool selectedCif = selectedFilter.contains(QStringLiteral("CIF crystallographic"), Qt::CaseInsensitive);
     const bool selectedExtXyz = selectedFilter.contains(QStringLiteral("Extended XYZ"), Qt::CaseInsensitive);
     const bool selectedPlainXyz = selectedFilter.contains(QStringLiteral("Plain XYZ"), Qt::CaseInsensitive);
     const bool selectedVasp = selectedFilter.contains(QStringLiteral("VASP POSCAR"), Qt::CaseInsensitive);
@@ -3489,6 +3594,8 @@ void MainWindow::saveStructureAs() {
     if (!hasSuffix) {
         if (selectedVasp && !isPoscarPath(path)) {
             path += QStringLiteral(".vasp");
+        } else if (selectedCif) {
+            path += QStringLiteral(".cif");
         } else if (selectedExtXyz) {
             path += QStringLiteral(".extxyz");
         } else if (selectedPlainXyz) {
@@ -3510,6 +3617,7 @@ void MainWindow::saveStructureAs() {
     }
 
     const bool saveAsPoscar = selectedVasp || isPoscarPath(path);
+    const bool saveAsCif = selectedCif || isCifPath(path);
     const bool saveAsXyz = selectedExtXyz || selectedPlainXyz || isXyzPath(path);
 
     if (saveAsPoscar) {
@@ -3527,6 +3635,19 @@ void MainWindow::saveStructureAs() {
         m_structure.sourcePath = path;
         applyStructureState(m_structure);
         statusBar()->showMessage(QStringLiteral("Saved POSCAR %1").arg(path), 4000);
+        return;
+    }
+
+    if (saveAsCif) {
+        QString errorMessage;
+        if (!writeCifFile(m_structure, path, &errorMessage)) {
+            QMessageBox::critical(this, "Save Structure", errorMessage);
+            return;
+        }
+        m_structure.dirty = false;
+        m_structure.sourcePath = path;
+        applyStructureState(m_structure);
+        statusBar()->showMessage(QStringLiteral("Saved CIF %1").arg(path), 4000);
         return;
     }
 
@@ -6452,6 +6573,31 @@ bool MainWindow::runAdsorbatePoseSelfTest(const QString& outputDirectory, QStrin
         return fail(QStringLiteral("CIF symmetry expansion coordinates mismatch."));
     }
 
+    const QString exportedCifPath = outputDir.filePath(QStringLiteral("coordinate_mode_current_structure.cif"));
+    writeError.clear();
+    if (!writeCifFile(m_structure, exportedCifPath, &writeError)) {
+        return fail(writeError);
+    }
+    artifacts << exportedCifPath;
+    loadError.clear();
+    const auto cifRoundTrip = loader.load(exportedCifPath, &loadError);
+    if (!cifRoundTrip.has_value()) {
+        return fail(loadError.isEmpty() ? QStringLiteral("Failed to reload written CIF.") : loadError);
+    }
+    if (!require(cifRoundTrip->atoms.size() == m_structure.atoms.size(), QStringLiteral("native CIF export reload preserves atom count"))) {
+        return fail(QStringLiteral("Reloaded CIF atom count mismatch."));
+    }
+    if (!require(closeVector(cifRoundTrip->cellVectors[0], m_structure.cellVectors[0], 1.0e-5)
+            && closeVector(cifRoundTrip->cellVectors[1], m_structure.cellVectors[1], 1.0e-5)
+            && closeVector(cifRoundTrip->cellVectors[2], m_structure.cellVectors[2], 1.0e-5),
+            QStringLiteral("native CIF export reload preserves cell vectors"))) {
+        return fail(QStringLiteral("Reloaded CIF cell vector mismatch."));
+    }
+    if (!require(closeVector(cifRoundTrip->atoms.front().fractional, m_structure.atoms.front().fractional, 1.0e-5),
+            QStringLiteral("native CIF export reload preserves fractional coordinates"))) {
+        return fail(QStringLiteral("Reloaded CIF fractional coordinate mismatch."));
+    }
+
     const QString directPoscarPath = outputDir.filePath(QStringLiteral("coordinate_mode_direct.vasp"));
     writeError.clear();
     if (!writePoscarFile(m_structure, directPoscarPath, CoordinateOutputMode::Direct, &writeError)) {
@@ -6470,8 +6616,8 @@ bool MainWindow::runAdsorbatePoseSelfTest(const QString& outputDirectory, QStrin
         return fail(writeError);
     }
     artifacts << fractionalXyzPath;
-    if (!require(QFileInfo(directPoscarPath).exists() && QFileInfo(cartesianPoscarPath).exists() && QFileInfo(fractionalXyzPath).exists(),
-            QStringLiteral("VASP and XYZ coordinate-mode export files are written"))) {
+    if (!require(QFileInfo(exportedCifPath).exists() && QFileInfo(directPoscarPath).exists() && QFileInfo(cartesianPoscarPath).exists() && QFileInfo(fractionalXyzPath).exists(),
+            QStringLiteral("CIF, VASP and XYZ coordinate-mode export files are written"))) {
         return fail(QStringLiteral("Coordinate-mode export file was not created."));
     }
 

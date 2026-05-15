@@ -96,11 +96,11 @@ cmake --build code/native_ui/build --config Release --parallel 2
 | --- | --- | --- |
 | VASP | `POSCAR`, `CONTCAR`, `.vasp`, `.poscar` | 計算投入前後の構造確認・保存 |
 | XYZ | `.xyz`, `.extxyz` | ASE とのやり取り。cell / PBC を残したい場合は extended XYZ 推奨 |
-| 結晶構造 | `.cif`, `.pdb`, `.xsf` | 外部データの読み込み。CIF は代表的な対称操作ループを展開 |
+| 結晶構造 | `.cif`, `.pdb`, `.xsf` | 外部データの読み込み。CIF は代表的な対称操作ループを展開し、編集後の現在構造を CIF として保存可能 |
 | ASEapp | `.aseproj`, `.json` | ASEapp の編集情報を保持した再編集用形式 |
 | VESTA | `.vesta` | VESTA 由来構造の取り込み |
 
-保存時は VASP/POSCAR で Direct / Cartesian、通常 XYZ で Cartesian / 分率座標を選択できます。extended XYZ は ASE 連携を優先し Cartesian `pos` として保存します。
+保存時は CIF、VASP/POSCAR、XYZ / extended XYZ を選択できます。CIF は現在表示中の全原子を P1 の構造として書き出します。VASP/POSCAR は Direct / Cartesian、通常 XYZ は Cartesian / 分率座標を選択できます。extended XYZ は ASE 連携を優先し Cartesian `pos` として保存します。
 
 ## 主な機能
 
@@ -147,7 +147,7 @@ cmake --build code/native_ui/build --config Release --parallel 2
 4. 原子をクリックして基準原子を選択します。
 5. `生成元素` と `配置位置` を決め、必要な時だけ `配置プレビューを表示` をオンにします。
 6. `配置する` を押して原子を追加します。
-7. `保存` で `.aseproj`, POSCAR, extended XYZ などに保存します。POSCAR は Direct / Cartesian、通常 XYZ は Cartesian / 分率座標を選べます。
+7. `保存` で `.aseproj`, CIF, POSCAR, extended XYZ などに保存します。POSCAR は Direct / Cartesian、通常 XYZ は Cartesian / 分率座標を選べます。
 
 ## ショートカット
 

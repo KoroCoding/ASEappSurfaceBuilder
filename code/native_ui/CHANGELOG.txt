@@ -16,6 +16,7 @@ Version 1.2.0 - VESTA-like display and startup polish
 - Changed normal bonds to VESTA-style half-and-half coloring using the colors of the atoms at each end.
 - Added the Outside cell toggle to show/hide VESTA-like periodic image atoms and bonds crossing the unit-cell boundary.
 - Added a GUI self-test assertion that the Outside cell toggle adds periodic boundary bonds.
+- Fixed the missing Save As path for CIF export; current structures can now be written as P1 CIF files.
 - Regenerated the verified Windows standalone launcher and macOS DMG as v1.2.0.
 
 Version 1.1.2 - Refactor and verified Windows rebuild

@@ -29,7 +29,7 @@ ASEapp Surface Builder
 5. Supercell、真空層除去、セル軸傾き、slab全体移動を使って slab / terrace 候補を整えます。
    Supercell 後に真空層除去やセル軸傾きを行っても、現在倍率は保持されます。
 6. 原子一覧PNG で、発表用の球＋ラベル画像を出力できます。
-7. Save で POSCAR / extended XYZ / 通常 XYZ 形式として保存します。POSCAR は Direct / Cartesian、通常 XYZ は Cartesian / 分率座標を選択できます。
+7. Save で CIF / POSCAR / extended XYZ / 通常 XYZ 形式として保存します。CIF は現在構造を P1 として書き出します。POSCAR は Direct / Cartesian、通常 XYZ は Cartesian / 分率座標を選択できます。
 
 対応入力
 --------
