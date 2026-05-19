@@ -10,6 +10,7 @@
 #include "ElementStyle.h"
 #include "StructureData.h"
 #include "SurfaceCustomizationRegistry.h"
+#include "SurfaceOperations.h"
 
 class QLabel;
 class QCheckBox;
@@ -103,6 +104,7 @@ private:
         bool hasSupercellBaseStructure = false;
         bool lastEditWasSupercell = false;
         std::array<int, 3> supercellFactors{1, 1, 1};
+        SupercellTransformMatrix supercellTransform = identitySupercellTransformMatrix();
         std::vector<int> selectedAtomIds;
         std::vector<PoseGroup> poseGroups;
         int activePoseGroupIndex = -1;
@@ -181,6 +183,7 @@ private:
     bool m_hasSupercellBaseStructure = false;
     bool m_lastEditWasSupercell = false;
     std::array<int, 3> m_supercellFactors{1, 1, 1};
+    SupercellTransformMatrix m_supercellTransform = identitySupercellTransformMatrix();
     QLabel* m_fileLabel = nullptr;
     QLabel* m_summaryLabel = nullptr;
     QLabel* m_presetPathLabel = nullptr;

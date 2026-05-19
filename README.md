@@ -10,7 +10,7 @@
 
 | やりたいこと | 最短ルート |
 | --- | --- |
-| アプリを起動したい | Windows は [`standalone_exe/windows/ASEappSurfaceBuilder-1.2.0-Windows.exe`](standalone_exe/windows/ASEappSurfaceBuilder-1.2.0-Windows.exe)、macOS は [`standalone_exe/macos/ASEappSurfaceBuilder-1.2.0-macOS.dmg`](standalone_exe/macos/ASEappSurfaceBuilder-1.2.0-macOS.dmg) を使用 |
+| アプリを起動したい | Windows は [`standalone_exe/windows/ASEappSurfaceBuilder-1.3.0-Windows.exe`](standalone_exe/windows/ASEappSurfaceBuilder-1.3.0-Windows.exe)、macOS は [`standalone_exe/macos/ASEappSurfaceBuilder-1.2.0-macOS.dmg`](standalone_exe/macos/ASEappSurfaceBuilder-1.2.0-macOS.dmg) を使用 |
 | 画面を見ながら使い方を知りたい | [操作ガイド `Guide.md`](Guide.md) を開く |
 | 自分でビルドしたい | [ソースからビルド](#ソースからビルド) を実行 |
 | 配布物を作り直したい | [`PACKAGING.md`](PACKAGING.md) を参照 |
@@ -22,7 +22,7 @@
 - アプリは単一起動に制限され、複数構造は既存ウィンドウ内のタブで切り替えられます。
 - CIF は `_space_group_symop_operation_xyz` / `_symmetry_equiv_pos_as_xyz` の対称操作を展開して描画します。
 - 原子を選択して、直上・直下・原子間・多点中心・面法線上に新しい原子を置けます。
-- Supercell、真空層、セル軸傾き、slab 全体移動を GUI で調整できます。
+- Supercell、3x3 整数格子変換行列、真空層、セル軸傾き、slab 全体移動を GUI で調整できます。
 - 前駆体 CSV を保存/読み込みし、同じ相対配置を別の表面位置に再利用できます。
 - 吸着分子を剛体グループ化し、数値並進、pivot 回転、結合軸回転、結合長調整ができます。
 - extended XYZ / pose JSON / ASE snippet を出力し、ASE 側のバッチ処理へ戻せます。
@@ -49,13 +49,13 @@
 
 | OS | 推奨 | 備考 |
 | --- | --- | --- |
-| Windows | [`standalone_exe/windows/ASEappSurfaceBuilder-1.2.0-Windows.exe`](standalone_exe/windows/ASEappSurfaceBuilder-1.2.0-Windows.exe) | 現在同梱している Windows 版は v1.2.0 です。互換確認用として v1.1.2 / v1.1.1 / v1.1.0 / v1.0.0 も同じフォルダに残しています。 |
+| Windows | [`standalone_exe/windows/ASEappSurfaceBuilder-1.3.0-Windows.exe`](standalone_exe/windows/ASEappSurfaceBuilder-1.3.0-Windows.exe) | 現在同梱している Windows 版は v1.3.0 です。互換確認用として v1.2.0 / v1.1.2 / v1.1.1 / v1.1.0 / v1.0.0 も同じフォルダに残しています。 |
 | macOS | [`standalone_exe/macos/ASEappSurfaceBuilder-1.2.0-macOS.dmg`](standalone_exe/macos/ASEappSurfaceBuilder-1.2.0-macOS.dmg) | 現在同梱している macOS 版は v1.2.0 です。互換確認用として v1.1.0 / v1.0.0 も同じフォルダに残しています。 |
 | Linux | ソースからビルド | Qt 6 と CMake が必要です。 |
 
 ### Windows: 同梱 EXE を起動
 
-`standalone_exe/windows/ASEappSurfaceBuilder-1.2.0-Windows.exe` を実行してください。
+`standalone_exe/windows/ASEappSurfaceBuilder-1.3.0-Windows.exe` を実行してください。
 
 ### macOS
 
@@ -219,7 +219,7 @@ ctest --test-dir code/native_ui/build -C Debug --output-on-failure
 | 症状 | 対処 |
 | --- | --- |
 | `freetype.dll` などが見つからない | ZIP 版は展開フォルダ全体を保ったまま起動してください。単体 EXE 版なら DLL 同梱の launcher を使えます。 |
-| `no Qt platform plugin could be initialized` が出る | v1.2.0 の再生成版では起動時に同梱 `plugins/platforms/qwindows.dll` を自動指定します。古い ZIP から `bin` だけを抜き出した場合は、ZIP 全体を展開するか単体 EXE 版を使ってください。 |
+| `no Qt platform plugin could be initialized` が出る | v1.3.0 の再生成版では起動時に同梱 `plugins/platforms/qwindows.dll` を自動指定します。古い ZIP から `bin` だけを抜き出した場合は、ZIP 全体を展開するか単体 EXE 版を使ってください。 |
 | Windows Application Control / Smart App Control で止まる | DLL 不足ではなく Windows 側の実行制御です。広く配布する正式版は信頼済みコード署名を推奨します。 |
 | 画面が重い | ボンド表示、ラベル、プレビューを必要な時だけ有効にし、Supercell を大きくしすぎないでください。 |
 | 原子配置位置がわかりにくい | `配置プレビューを表示` をオンにして、半透明の予定位置を確認してから `配置する` を押してください。 |

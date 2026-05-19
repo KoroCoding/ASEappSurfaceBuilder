@@ -107,8 +107,22 @@ std::pair<QVector3D, QVector3D> canonicalReciprocalViewDirection(const std::arra
     return {reciprocalDirection(cell, axisIndex), cell[static_cast<std::size_t>(upIndex)]};
 }
 
-bool hasNonIdentitySupercellFactors(const std::array<int, 3>& factors) {
-    return factors[0] != 1 || factors[1] != 1 || factors[2] != 1;
+QString supercellMatrixText(const SupercellTransformMatrix& matrix) {
+    return QStringLiteral("[%1 %2 %3; %4 %5 %6; %7 %8 %9]")
+        .arg(matrix[0][0]).arg(matrix[0][1]).arg(matrix[0][2])
+        .arg(matrix[1][0]).arg(matrix[1][1]).arg(matrix[1][2])
+        .arg(matrix[2][0]).arg(matrix[2][1]).arg(matrix[2][2]);
+}
+
+QString supercellTransformLabel(const SupercellTransformMatrix& matrix, bool japanese) {
+    std::array<int, 3> factors{1, 1, 1};
+    if (isDiagonalSupercellTransform(matrix, &factors)) {
+        return QStringLiteral("%1 × %2 × %3").arg(factors[0]).arg(factors[1]).arg(factors[2]);
+    }
+    const long long determinant = supercellTransformDeterminant(matrix);
+    return japanese
+        ? QStringLiteral("行列 %1（体積倍率 ×%2）").arg(supercellMatrixText(matrix)).arg(determinant)
+        : QStringLiteral("matrix %1 (volume ×%2)").arg(supercellMatrixText(matrix)).arg(determinant);
 }
 
 bool editPreservesSupercellBase(const QString& label) {
@@ -1151,25 +1165,33 @@ QImage renderElementLegendImage(const std::vector<ElementLegendEntry>& entries, 
 
 class SupercellDialog final : public QDialog {
 public:
+    struct Result {
+        int a = 1;
+        int b = 1;
+        int c = 1;
+        bool useMatrix = false;
+        SupercellTransformMatrix matrix = identitySupercellTransformMatrix();
+    };
+
     explicit SupercellDialog(
         bool japanese,
         const StructureData& baseStructure,
         const std::array<int, 3>& currentFactors,
+        const SupercellTransformMatrix& currentTransform,
         QWidget* parent = nullptr) : QDialog(parent) {
+        m_japanese = japanese;
+        m_baseAtomCount = static_cast<qint64>(baseStructure.atoms.size());
         setWindowTitle(japanese ? QStringLiteral("スーパーセル作成") : QStringLiteral("Create Supercell"));
         auto* layout = new QVBoxLayout(this);
+        const QString currentTransformLabel = supercellTransformLabel(currentTransform, japanese);
         auto* info = new QLabel(
             japanese
-                ? QStringLiteral("倍率は現在の拡大後構造ではなく、初期/基準構造に対する絶対倍率です。\n基準原子数: %1 / 現在倍率: %2 × %3 × %4")
+                ? QStringLiteral("倍率/変換は現在の拡大後構造ではなく、初期/基準構造に対する絶対指定です。\n基準原子数: %1 / 現在変換: %2")
                     .arg(baseStructure.atoms.size())
-                    .arg(currentFactors[0])
-                    .arg(currentFactors[1])
-                    .arg(currentFactors[2])
-                : QStringLiteral("Multipliers are absolute values relative to the initial/base structure, not relative to the current enlarged cell.\nBase atoms: %1 / Current factors: %2 × %3 × %4")
+                    .arg(currentTransformLabel)
+                : QStringLiteral("Multipliers/transforms are absolute values relative to the initial/base structure, not relative to the current enlarged cell.\nBase atoms: %1 / Current transform: %2")
                     .arg(baseStructure.atoms.size())
-                    .arg(currentFactors[0])
-                    .arg(currentFactors[1])
-                    .arg(currentFactors[2]),
+                    .arg(currentTransformLabel),
             this);
         info->setWordWrap(true);
         layout->addWidget(info);
@@ -1186,16 +1208,136 @@ public:
         form->addRow(japanese ? QStringLiteral("b方向倍率") : QStringLiteral("b multiplier"), m_b);
         form->addRow(japanese ? QStringLiteral("c方向倍率") : QStringLiteral("c multiplier"), m_c);
         layout->addLayout(form);
-        auto* buttons = new QDialogButtonBox(QDialogButtonBox::Ok | QDialogButtonBox::Cancel, this);
-        connect(buttons, &QDialogButtonBox::accepted, this, &QDialog::accept);
-        connect(buttons, &QDialogButtonBox::rejected, this, &QDialog::reject);
-        layout->addWidget(buttons);
+        m_useMatrix = new QCheckBox(
+            japanese
+                ? QStringLiteral("格子変換行列を直接入力する")
+                : QStringLiteral("Enter lattice transform matrix directly"),
+            this);
+        m_useMatrix->setToolTip(
+            japanese
+                ? QStringLiteral("行ごとに a' / b' / c' を、元の a,b,c の整数係数で指定します。例: a'=a+b, b'=-a+b, c'=c。")
+                : QStringLiteral("Rows define a' / b' / c' as integer coefficients of the original a,b,c axes."));
+        layout->addWidget(m_useMatrix);
+
+        auto* matrixGroup = new QGroupBox(
+            japanese
+                ? QStringLiteral("格子変換行列 M: [a' b' c'] = M × [a b c]")
+                : QStringLiteral("Lattice transform matrix M: [a' b' c'] = M × [a b c]"),
+            this);
+        auto* grid = new QGridLayout(matrixGroup);
+        const QStringList columnLabels{QStringLiteral("a"), QStringLiteral("b"), QStringLiteral("c")};
+        const QStringList rowLabels{QStringLiteral("a'"), QStringLiteral("b'"), QStringLiteral("c'")};
+        for (int column = 0; column < 3; ++column) {
+            grid->addWidget(new QLabel(columnLabels[column], matrixGroup), 0, column + 1, Qt::AlignCenter);
+        }
+        for (int row = 0; row < 3; ++row) {
+            grid->addWidget(new QLabel(rowLabels[row], matrixGroup), row + 1, 0, Qt::AlignRight | Qt::AlignVCenter);
+            for (int column = 0; column < 3; ++column) {
+                auto* spin = new QSpinBox(matrixGroup);
+                spin->setRange(-20, 20);
+                spin->setValue(currentTransform[row][column]);
+                spin->setAlignment(Qt::AlignRight);
+                m_matrix[row][column] = spin;
+                grid->addWidget(spin, row + 1, column + 1);
+                connect(spin, qOverload<int>(&QSpinBox::valueChanged), this, [this]() { refreshMatrixStatus(); });
+            }
+        }
+        m_matrixStatus = new QLabel(matrixGroup);
+        m_matrixStatus->setWordWrap(true);
+        grid->addWidget(m_matrixStatus, 4, 0, 1, 4);
+        layout->addWidget(matrixGroup);
+
+        connect(m_useMatrix, &QCheckBox::toggled, this, [this]() { refreshMatrixStatus(); });
+        m_buttons = new QDialogButtonBox(QDialogButtonBox::Ok | QDialogButtonBox::Cancel, this);
+        connect(m_buttons, &QDialogButtonBox::accepted, this, &QDialog::accept);
+        connect(m_buttons, &QDialogButtonBox::rejected, this, &QDialog::reject);
+        layout->addWidget(m_buttons);
+        std::array<int, 3> diagonalFactors{1, 1, 1};
+        const bool currentIsDiagonal = isDiagonalSupercellTransform(currentTransform, &diagonalFactors);
+        if (currentIsDiagonal) {
+            m_a->setValue(std::clamp(diagonalFactors[0], 1, 20));
+            m_b->setValue(std::clamp(diagonalFactors[1], 1, 20));
+            m_c->setValue(std::clamp(diagonalFactors[2], 1, 20));
+        }
+        m_useMatrix->setChecked(!currentIsDiagonal);
+        refreshMatrixStatus();
     }
-    std::tuple<int, int, int> values() const { return {m_a->value(), m_b->value(), m_c->value()}; }
+    Result result() const {
+        Result value;
+        value.a = m_a->value();
+        value.b = m_b->value();
+        value.c = m_c->value();
+        value.useMatrix = m_useMatrix != nullptr && m_useMatrix->isChecked();
+        value.matrix = value.useMatrix
+            ? matrixValues()
+            : diagonalSupercellTransformMatrix(value.a, value.b, value.c);
+        return value;
+    }
 private:
+    SupercellTransformMatrix matrixValues() const {
+        SupercellTransformMatrix matrix = identitySupercellTransformMatrix();
+        for (int row = 0; row < 3; ++row) {
+            for (int column = 0; column < 3; ++column) {
+                matrix[row][column] = m_matrix[row][column] != nullptr ? m_matrix[row][column]->value() : (row == column ? 1 : 0);
+            }
+        }
+        return matrix;
+    }
+
+    void refreshMatrixStatus() {
+        if (m_matrixStatus == nullptr || m_buttons == nullptr || m_useMatrix == nullptr) {
+            return;
+        }
+        const SupercellTransformMatrix matrix = matrixValues();
+        const long long determinant = supercellTransformDeterminant(matrix);
+        const bool useMatrix = m_useMatrix->isChecked();
+        if (m_a != nullptr) m_a->setEnabled(!useMatrix);
+        if (m_b != nullptr) m_b->setEnabled(!useMatrix);
+        if (m_c != nullptr) m_c->setEnabled(!useMatrix);
+        for (int row = 0; row < 3; ++row) {
+            for (int column = 0; column < 3; ++column) {
+                if (m_matrix[row][column] != nullptr) {
+                    m_matrix[row][column]->setEnabled(useMatrix);
+                }
+            }
+        }
+        QString message;
+        bool valid = determinant > 0 && determinant <= 8000;
+        if (determinant <= 0) {
+            message = m_japanese
+                ? QStringLiteral("行列式が正の値ではありません。右手系を保つ非特異な整数行列を入力してください。")
+                : QStringLiteral("The determinant is not positive. Enter a non-singular right-handed integer matrix.");
+        } else if (determinant > 8000) {
+            message = m_japanese
+                ? QStringLiteral("体積倍率が大きすぎます（×%1）。上限は ×8000 です。").arg(determinant)
+                : QStringLiteral("The volume factor is too large (×%1). The limit is ×8000.").arg(determinant);
+        } else {
+            const qint64 expectedAtoms = m_baseAtomCount * determinant;
+            message = m_japanese
+                ? QStringLiteral("行列式/体積倍率: ×%1 / 予想原子数: %2\n%3\n行ごとに a' / b' / c' を元の a,b,c の係数で指定します。")
+                    .arg(determinant)
+                    .arg(expectedAtoms)
+                    .arg(supercellMatrixText(matrix))
+                : QStringLiteral("Determinant / volume factor: ×%1 / Expected atoms: %2\n%3\nRows define a' / b' / c' as coefficients of the original a,b,c axes.")
+                    .arg(determinant)
+                    .arg(expectedAtoms)
+                    .arg(supercellMatrixText(matrix));
+        }
+        m_matrixStatus->setText(message);
+        if (auto* okButton = m_buttons->button(QDialogButtonBox::Ok)) {
+            okButton->setEnabled(!useMatrix || valid);
+        }
+    }
+
     QSpinBox* m_a = nullptr;
     QSpinBox* m_b = nullptr;
     QSpinBox* m_c = nullptr;
+    QSpinBox* m_matrix[3][3]{};
+    QCheckBox* m_useMatrix = nullptr;
+    QLabel* m_matrixStatus = nullptr;
+    QDialogButtonBox* m_buttons = nullptr;
+    bool m_japanese = true;
+    qint64 m_baseAtomCount = 0;
 };
 
 class HydrogenTerminationDialog final : public QDialog {
@@ -2194,7 +2336,7 @@ public:
             "3. 配置位置を選び、Apply で選択原子上/原子間/多点中心に原子を配置します。直上/直下は複数選択の各原子へ一括配置します。\n"
             "4. 前駆体CSV保存で名称を付け、読込後は前駆体ドロップダウンから選んで現在の配置位置に置けます。\n"
             "5. 吸着分子ポーズ編集で、選択原子群を剛体グループ化し、XYZ/cell/法線方向の数値並進、pivot固定回転、XYZ/extXYZ/pose JSON/ASE snippet出力を行います。\n"
-            "6. Supercell で a/b/c 方向に拡張します。\n"
+            "6. Supercell で a/b/c 方向に拡張します。必要に応じて整数の格子変換行列を直接入力し、回転セルも作成できます。\n"
             "7. セル軸傾きで、c軸などをa/b方向へ傾けてステップテラス候補を作れます。\n"
             "8. 真空層 で真空層の追加・除去、またはスラブ全体の移動を行います。真空層除去ボタンでは c軸方向をすぐ詰められます。\n"
             "9. 原子対ボンド長で、読み込まれている構造の全原子対距離を一覧し、Target Å を個別に修正できます。\n"
@@ -2218,7 +2360,7 @@ public:
             "3. Choose a placement option and Apply to place atoms directly above/below or at the center of all selected atoms. Directly above/below applies to every selected atom.\n"
             "4. Save precursor CSV with a name, then load and choose it from the precursor dropdown to place it at the current placement position.\n"
             "5. Use Adsorbate pose editor to group selected atoms as a rigid body, translate by XYZ/cell/normal values, rotate around a fixed pivot, and export XYZ/extXYZ/pose JSON/ASE snippets.\n"
-            "6. Use Supercell to repeat along a/b/c.\n"
+            "6. Use Supercell to repeat along a/b/c. Enter an integer lattice transform matrix directly when you need rotated cells.\n"
             "7. Use Axis tilt to tilt c or another cell axis toward a/b for step-terrace candidates.\n"
             "8. Use Vacuum to add/remove vacuum or move the whole slab. Remove vacuum immediately tightens the c-axis.\n"
             "9. Use Atom-pair lengths to list every atom-pair distance in the loaded structure and edit each Target Å individually.\n"
@@ -2273,7 +2415,8 @@ public:
             "<li>Save As から CIF / POSCAR / XYZ / extended XYZ を保存できます。ポーズ出力からは extended XYZ / pose JSON / ASE snippet を保存し、ASE 側の大量 slab 生成へ戻せます。</li>"
             "</ul>"
             "<b>3. スーパーセル/真空</b><ul>"
-            "<li>Supercell で a/b/c 方向の倍率を指定します。</li>"
+            "<li>Supercell で a/b/c 方向の倍率、または整数の格子変換行列を指定します。</li>"
+            "<li>行列入力では、行ごとに a' / b' / c' を元の a,b,c の係数で指定します。</li>"
             "<li>セル軸傾きで c軸などを a/b方向へ傾け、fractional座標を保ったままステップテラス候補を作れます。</li>"
             "<li>真空層 で真空層の追加・除去、スラブ全体移動を行います。真空層除去ボタンでは c軸方向をすぐ詰められます。</li>"
             "</ul>"
@@ -2307,7 +2450,8 @@ public:
             "<li>Use Save As to write CIF / POSCAR / XYZ / extended XYZ files. Pose export writes extended XYZ, pose JSON, or an ASE snippet for batch slab generation.</li>"
             "</ul>"
             "<b>3. Supercell/Vacuum</b><ul>"
-            "<li>Use Supercell to set repeat counts along a/b/c.</li>"
+            "<li>Use Supercell to set repeat counts along a/b/c or enter an integer lattice transform matrix.</li>"
+            "<li>In matrix mode, each row defines a' / b' / c' as coefficients of the original a,b,c axes.</li>"
             "<li>Use Axis tilt to tilt c or another cell axis toward a/b while preserving fractional coordinates for step-terrace candidates.</li>"
             "<li>Use Vacuum to add/remove vacuum or translate the whole slab. Remove vacuum immediately tightens the c-axis.</li>"
             "</ul>"
@@ -2417,7 +2561,7 @@ QString MainWindow::uiText(const QString& key) const {
         if (key == "perspective") return QStringLiteral("透視投影");
         if (key == "depth_cue") return QStringLiteral("奥行き");
         if (key == "right_place_tip") return QStringLiteral("左クリックで単一選択、Ctrl+左クリック/ドラッグで重なった奥の原子も追加選択できます。Escで選択解除できます。");
-        if (key == "supercell_tip") return QStringLiteral("a/b/c方向に構造を繰り返してスーパーセルを作成します。");
+        if (key == "supercell_tip") return QStringLiteral("a/b/c倍率または整数の格子変換行列でスーパーセルを作成します。");
         if (key == "vacuum_tip") return QStringLiteral("真空層をÅ単位で追加/除去し、スラブ全体をa/b/c方向へ移動します。");
         if (key == "remove_vacuum_tip") return QStringLiteral("c軸方向の余分な真空層をなくし、原子範囲にセルを合わせます。");
         if (key == "axis_tilt_tip") return QStringLiteral("セル軸そのものを指定方向へ傾けます。c軸をa/b方向へ傾けるとステップテラス候補を作りやすくなります。");
@@ -2508,7 +2652,7 @@ QString MainWindow::uiText(const QString& key) const {
         if (key == "perspective") return QStringLiteral("Perspective");
         if (key == "depth_cue") return QStringLiteral("Depth cue");
         if (key == "right_place_tip") return QStringLiteral("Select targets with left click or Ctrl+left click/drag, including overlapped rear atoms. Esc clears selection.");
-        if (key == "supercell_tip") return QStringLiteral("Repeat the structure along a/b/c to create a supercell.");
+        if (key == "supercell_tip") return QStringLiteral("Create a supercell from a/b/c multipliers or an integer lattice transform matrix.");
         if (key == "vacuum_tip") return QStringLiteral("Add/remove vacuum in Å and translate the whole slab along a/b/c.");
         if (key == "remove_vacuum_tip") return QStringLiteral("Remove extra vacuum along the c-axis and fit the cell to the atom bounds.");
         if (key == "axis_tilt_tip") return QStringLiteral("Tilt a cell axis toward another lattice direction. Tilting c toward a/b helps create step-terrace candidates.");
@@ -3273,6 +3417,7 @@ void MainWindow::initializeDefaultDocument() {
     m_hasSupercellBaseStructure = true;
     m_lastEditWasSupercell = false;
     m_supercellFactors = {1, 1, 1};
+    m_supercellTransform = identitySupercellTransformMatrix();
     m_selectedAtomIds.clear();
     m_loadedPrecursors.clear();
     m_poseGroups.clear();
@@ -3410,6 +3555,7 @@ void MainWindow::newEmptyTab() {
     m_hasSupercellBaseStructure = true;
     m_lastEditWasSupercell = false;
     m_supercellFactors = {1, 1, 1};
+    m_supercellTransform = identitySupercellTransformMatrix();
     m_selectedAtomIds.clear();
     m_loadedPrecursors.clear();
     m_poseGroups.clear();
@@ -3493,6 +3639,7 @@ bool MainWindow::loadFromPath(const QString& path) {
     m_hasSupercellBaseStructure = true;
     m_lastEditWasSupercell = false;
     m_supercellFactors = {1, 1, 1};
+    m_supercellTransform = identitySupercellTransformMatrix();
     m_selectedAtomIds.clear();
     m_loadedPrecursors.clear();
     m_undoStack.clear();
@@ -3829,19 +3976,35 @@ void MainWindow::createSupercell() {
         m_supercellBaseStructure = m_structure;
         m_hasSupercellBaseStructure = true;
         m_supercellFactors = {1, 1, 1};
+        m_supercellTransform = identitySupercellTransformMatrix();
     }
-    SupercellDialog dialog(m_japanese, m_supercellBaseStructure, m_supercellFactors, this);
+    SupercellDialog dialog(m_japanese, m_supercellBaseStructure, m_supercellFactors, m_supercellTransform, this);
     if (dialog.exec() != QDialog::Accepted) return;
-    const auto [a, b, c] = dialog.values();
-    StructureData updated = makeSupercellStructure(m_supercellBaseStructure, a, b, c);
+    const SupercellDialog::Result result = dialog.result();
+    QString transformError;
+    StructureData updated = result.useMatrix
+        ? makeSupercellStructure(m_supercellBaseStructure, result.matrix, &transformError)
+        : makeSupercellStructure(m_supercellBaseStructure, result.a, result.b, result.c);
+    if (!transformError.isEmpty()) {
+        QMessageBox::warning(
+            this,
+            m_japanese ? QStringLiteral("スーパーセル作成") : QStringLiteral("Create Supercell"),
+            transformError);
+        return;
+    }
     updated.title = m_supercellBaseStructure.title;
     updated.sourcePath = m_supercellBaseStructure.sourcePath;
-    m_supercellFactors = {a, b, c};
+    m_supercellTransform = result.matrix;
+    std::array<int, 3> diagonalFactors{1, 1, 1};
+    m_supercellFactors = isDiagonalSupercellTransform(result.matrix, &diagonalFactors)
+        ? diagonalFactors
+        : std::array<int, 3>{1, 1, 1};
     replaceStructureFromEdit(updated, QStringLiteral("supercell"));
+    const QString transformLabel = supercellTransformLabel(result.matrix, m_japanese);
     statusBar()->showMessage(
         m_japanese
-            ? QStringLiteral("基準構造に対して %1×%2×%3 のスーパーセルを生成しました。").arg(a).arg(b).arg(c)
-            : QStringLiteral("Created %1×%2×%3 supercell relative to the base structure.").arg(a).arg(b).arg(c),
+            ? QStringLiteral("基準構造に対して %1 のスーパーセルを生成しました。").arg(transformLabel)
+            : QStringLiteral("Created %1 supercell relative to the base structure.").arg(transformLabel),
         4000);
 }
 
@@ -4958,6 +5121,7 @@ MainWindow::EditSnapshot MainWindow::captureEditSnapshot() const {
     snapshot.hasSupercellBaseStructure = m_hasSupercellBaseStructure;
     snapshot.lastEditWasSupercell = m_lastEditWasSupercell;
     snapshot.supercellFactors = m_supercellFactors;
+    snapshot.supercellTransform = m_supercellTransform;
     snapshot.selectedAtomIds = m_selectedAtomIds;
     snapshot.poseGroups = m_poseGroups;
     if (m_poseGroupCombo != nullptr) {
@@ -4985,6 +5149,7 @@ void MainWindow::restoreEditSnapshot(const EditSnapshot& snapshot, bool forceDir
     m_hasSupercellBaseStructure = snapshot.hasSupercellBaseStructure;
     m_lastEditWasSupercell = snapshot.lastEditWasSupercell;
     m_supercellFactors = snapshot.supercellFactors;
+    m_supercellTransform = snapshot.supercellTransform;
     m_poseGroups = snapshot.poseGroups;
     m_translationUndoActive = false;
 
@@ -6018,31 +6183,24 @@ QString MainWindow::supercellStatusText() const {
         ? static_cast<qint64>(m_supercellBaseStructure.atoms.size())
         : static_cast<qint64>(m_structure.atoms.size());
     const qint64 currentAtoms = static_cast<qint64>(m_structure.atoms.size());
-    if (hasNonIdentitySupercellFactors(m_supercellFactors)) {
+    const QString transformLabel = supercellTransformLabel(m_supercellTransform, m_japanese);
+    if (!isIdentitySupercellTransform(m_supercellTransform)) {
         if (!m_lastEditWasSupercell) {
             return m_japanese
-                ? QStringLiteral("現在: %1 × %2 × %3（編集後も倍率を保持）\n現在原子数: %4\n※次のスーパーセル作成では、現在の編集済み構造を新しい基準にします。")
-                    .arg(m_supercellFactors[0])
-                    .arg(m_supercellFactors[1])
-                    .arg(m_supercellFactors[2])
+                ? QStringLiteral("現在: %1（編集後も変換を保持）\n現在原子数: %2\n※次のスーパーセル作成では、現在の編集済み構造を新しい基準にします。")
+                    .arg(transformLabel)
                     .arg(currentAtoms)
-                : QStringLiteral("Current: %1 × %2 × %3 (factors kept after edits)\nCurrent atoms: %4\nThe next supercell operation will use the current edited structure as the new base.")
-                    .arg(m_supercellFactors[0])
-                    .arg(m_supercellFactors[1])
-                    .arg(m_supercellFactors[2])
+                : QStringLiteral("Current: %1 (transform kept after edits)\nCurrent atoms: %2\nThe next supercell operation will use the current edited structure as the new base.")
+                    .arg(transformLabel)
                     .arg(currentAtoms);
         }
         return m_japanese
-            ? QStringLiteral("現在: 初期/基準構造に対して %1 × %2 × %3\n基準原子数: %4 → 現在原子数: %5\n※真空層操作やセル軸傾き後も倍率を保持します。再実行時はこの基準から作り直せます。")
-                .arg(m_supercellFactors[0])
-                .arg(m_supercellFactors[1])
-                .arg(m_supercellFactors[2])
+            ? QStringLiteral("現在: 初期/基準構造に対して %1\n基準原子数: %2 → 現在原子数: %3\n※真空層操作やセル軸傾き後も変換を保持します。再実行時はこの基準から作り直せます。")
+                .arg(transformLabel)
                 .arg(baseAtoms)
                 .arg(currentAtoms)
-            : QStringLiteral("Current: %1 × %2 × %3 relative to the initial/base structure\nBase atoms: %4 → current atoms: %5\nVacuum operations and cell-axis tilt keep these factors. Re-running regenerates from this base.")
-                .arg(m_supercellFactors[0])
-                .arg(m_supercellFactors[1])
-                .arg(m_supercellFactors[2])
+            : QStringLiteral("Current: %1 relative to the initial/base structure\nBase atoms: %2 → current atoms: %3\nVacuum operations and cell-axis tilt keep this transform. Re-running regenerates from this base.")
+                .arg(transformLabel)
                 .arg(baseAtoms)
                 .arg(currentAtoms);
     }
@@ -6123,6 +6281,7 @@ bool MainWindow::runAdsorbatePoseSelfTest(const QString& outputDirectory, QStrin
     m_hasSupercellBaseStructure = true;
     m_lastEditWasSupercell = false;
     m_supercellFactors = {1, 1, 1};
+    m_supercellTransform = identitySupercellTransformMatrix();
     m_undoStack.clear();
     m_redoStack.clear();
     m_poseGroups.clear();
@@ -6147,6 +6306,45 @@ bool MainWindow::runAdsorbatePoseSelfTest(const QString& outputDirectory, QStrin
     syncCanvasDisplayOptions();
 
     const StructureData poseStructureAfterBondRangeCheck = m_structure;
+    StructureData matrixSupercellBase;
+    matrixSupercellBase.title = QStringLiteral("ASEapp matrix supercell self-test");
+    matrixSupercellBase.cellVectors = {
+        QVector3D(2.0f, 0.0f, 0.0f),
+        QVector3D(0.0f, 2.0f, 0.0f),
+        QVector3D(0.0f, 0.0f, 8.0f)
+    };
+    matrixSupercellBase.atoms = {
+        selfTestAtom(matrixSupercellBase, 1, QStringLiteral("Cu"), QVector3D(0.0f, 0.0f, 0.0f), QStringLiteral("matrix-Cu-0001")),
+        selfTestAtom(matrixSupercellBase, 2, QStringLiteral("O"), QVector3D(1.0f, 1.0f, 2.0f), QStringLiteral("matrix-O-0002"))
+    };
+    const SupercellTransformMatrix rotate45Matrix = {{{{1, 1, 0}}, {{-1, 1, 0}}, {{0, 0, 1}}}};
+    QString matrixSupercellError;
+    const StructureData matrixSupercell = makeSupercellStructure(matrixSupercellBase, rotate45Matrix, &matrixSupercellError);
+    if (!require(matrixSupercellError.isEmpty(), QStringLiteral("matrix supercell accepts a user-entered sqrt2 x sqrt2 R45 transform"))) {
+        return fail(matrixSupercellError);
+    }
+    if (!require(matrixSupercell.atoms.size() == matrixSupercellBase.atoms.size() * 2,
+            QStringLiteral("matrix supercell atom count follows the transform determinant"))) {
+        return fail(QStringLiteral("Matrix supercell atom count mismatch."));
+    }
+    if (!require(close(static_cast<double>(matrixSupercell.cellVectors[0].length()), std::sqrt(8.0), 1.0e-5)
+            && close(static_cast<double>(matrixSupercell.cellVectors[1].length()), std::sqrt(8.0), 1.0e-5),
+            QStringLiteral("matrix supercell creates sqrt2-length rotated in-plane vectors"))) {
+        return fail(QStringLiteral("Matrix supercell lattice vector length mismatch."));
+    }
+    if (!require(close(static_cast<double>(QVector3D::dotProduct(matrixSupercell.cellVectors[0], matrixSupercell.cellVectors[1])), 0.0, 1.0e-5),
+            QStringLiteral("matrix supercell keeps the R45 in-plane vectors orthogonal for a square source cell"))) {
+        return fail(QStringLiteral("Matrix supercell in-plane vectors were not orthogonal."));
+    }
+    const bool matrixFractionsInside = std::all_of(matrixSupercell.atoms.begin(), matrixSupercell.atoms.end(), [](const NativeAtom& atom) {
+        return atom.fractional.x() >= -1.0e-6f && atom.fractional.x() < 1.0f
+            && atom.fractional.y() >= -1.0e-6f && atom.fractional.y() < 1.0f
+            && atom.fractional.z() >= -1.0e-6f && atom.fractional.z() < 1.0f;
+    });
+    if (!require(matrixFractionsInside, QStringLiteral("matrix supercell wraps generated fractional coordinates inside the new cell"))) {
+        return fail(QStringLiteral("Matrix supercell generated an out-of-cell fractional coordinate."));
+    }
+
     StructureData periodicBoundaryStructure;
     periodicBoundaryStructure.title = QStringLiteral("ASEapp periodic boundary display self-test");
     periodicBoundaryStructure.cellVectors = {
@@ -6163,6 +6361,7 @@ bool MainWindow::runAdsorbatePoseSelfTest(const QString& outputDirectory, QStrin
     m_hasSupercellBaseStructure = true;
     m_lastEditWasSupercell = false;
     m_supercellFactors = {1, 1, 1};
+    m_supercellTransform = identitySupercellTransformMatrix();
     applyStructureState(m_structure);
     if (m_showOutsideCellCheck != nullptr) {
         m_showOutsideCellCheck->setChecked(false);
@@ -6183,6 +6382,7 @@ bool MainWindow::runAdsorbatePoseSelfTest(const QString& outputDirectory, QStrin
     m_hasSupercellBaseStructure = true;
     m_lastEditWasSupercell = false;
     m_supercellFactors = {1, 1, 1};
+    m_supercellTransform = identitySupercellTransformMatrix();
     applyStructureState(m_structure);
     if (m_showOutsideCellCheck != nullptr) {
         m_showOutsideCellCheck->setChecked(true);

@@ -8,6 +8,8 @@
 
 #include "StructureData.h"
 
+using SupercellTransformMatrix = std::array<std::array<int, 3>, 3>;
+
 struct SurfacePlacementRule {
     QString name;
     QString description;
@@ -45,7 +47,16 @@ struct CellAxisTiltOptions {
 };
 
 StructureData makeDefaultStructure();
+SupercellTransformMatrix identitySupercellTransformMatrix();
+SupercellTransformMatrix diagonalSupercellTransformMatrix(int aMult, int bMult, int cMult);
+long long supercellTransformDeterminant(const SupercellTransformMatrix& matrix);
+bool isIdentitySupercellTransform(const SupercellTransformMatrix& matrix);
+bool isDiagonalSupercellTransform(const SupercellTransformMatrix& matrix, std::array<int, 3>* factors = nullptr);
 StructureData makeSupercellStructure(const StructureData& source, int aMult, int bMult, int cMult);
+StructureData makeSupercellStructure(
+    const StructureData& source,
+    const SupercellTransformMatrix& matrix,
+    QString* errorMessage = nullptr);
 StructureData makeVacuumReboxedStructure(
     const StructureData& source,
     const QVector3D& direction,

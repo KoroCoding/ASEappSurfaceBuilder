@@ -6,7 +6,7 @@ ASEapp Surface Builder
 起動方法
 --------
 - 単体 launcher 版を使う場合:
-  ASEappSurfaceBuilder-1.2.0-Windows.exe を実行します。
+  ASEappSurfaceBuilder-1.3.0-Windows.exe を実行します。
 
 - ZIP 展開版を使う場合:
   bin\ASEappNativeUI.exe を実行します。
@@ -27,6 +27,7 @@ ASEapp Surface Builder
    価電子数・電子殻・原子量などの詳細はカーソルを合わせた時だけ暗色ポップアップで確認できます。
 4. 前駆体CSV保存で名称を付けて保存し、読込後は生成元素とは別の前駆体ドロップダウンから選んで、現在の配置位置へ再利用できます。
 5. Supercell、真空層除去、セル軸傾き、slab全体移動を使って slab / terrace 候補を整えます。
+   45度回転などが必要な場合は、Supercell ダイアログで「格子変換行列を直接入力する」をオンにし、例 `[1 1 0; -1 1 0; 0 0 1]` のような 3x3 整数行列を入力します。
    Supercell 後に真空層除去やセル軸傾きを行っても、現在倍率は保持されます。
 6. 原子一覧PNG で、発表用の球＋ラベル画像を出力できます。
 7. Save で CIF / POSCAR / extended XYZ / 通常 XYZ 形式として保存します。CIF は現在構造を P1 として書き出します。POSCAR は Direct / Cartesian、通常 XYZ は Cartesian / 分率座標を選択できます。

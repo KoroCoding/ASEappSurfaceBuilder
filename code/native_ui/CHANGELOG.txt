@@ -4,6 +4,14 @@ ASEapp Surface Builder CHANGELOG
 Unreleased
 ----------
 
+Version 1.3.0 - Matrix supercell transforms
+------------------------------------------------
+- Added optional direct 3x3 integer lattice-transform input to the Supercell dialog, so rotated supercells such as sqrt(2) x sqrt(2) R45 can be generated without adding one-off presets.
+- Kept the existing a/b/c multiplier workflow as the default, while showing determinant and expected atom count validation in matrix mode before Apply.
+- Preserved matrix-based supercell state through snapshots, undo/redo, and tab switching.
+- Added a GUI self-test assertion for the sqrt(2) x sqrt(2) R45 transform, including determinant atom count, rotated cell lengths, orthogonality, and fractional-coordinate bounds.
+- Updated the operation guide and packaged quick-start text for the new matrix-input workflow.
+
 Version 1.2.0 - VESTA-like display and startup polish
 ------------------------------------------------------
 - Added a side preview to the Atom legend PNG export dialog, plus label prefix/suffix fields and manual element-order controls.

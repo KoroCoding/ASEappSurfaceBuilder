@@ -13,6 +13,33 @@ QVector3D toCartesian(const std::array<QVector3D, 3>& cell, const QVector3D& fra
     return cell[0] * frac.x() + cell[1] * frac.y() + cell[2] * frac.z();
 }
 
+long long determinant3x3(const SupercellTransformMatrix& matrix) {
+    return static_cast<long long>(matrix[0][0]) * (matrix[1][1] * matrix[2][2] - matrix[1][2] * matrix[2][1])
+        - static_cast<long long>(matrix[0][1]) * (matrix[1][0] * matrix[2][2] - matrix[1][2] * matrix[2][0])
+        + static_cast<long long>(matrix[0][2]) * (matrix[1][0] * matrix[2][1] - matrix[1][1] * matrix[2][0]);
+}
+
+bool invert3x3(const double matrix[3][3], double inverse[3][3]) {
+    const double det =
+        matrix[0][0] * (matrix[1][1] * matrix[2][2] - matrix[1][2] * matrix[2][1])
+        - matrix[0][1] * (matrix[1][0] * matrix[2][2] - matrix[1][2] * matrix[2][0])
+        + matrix[0][2] * (matrix[1][0] * matrix[2][1] - matrix[1][1] * matrix[2][0]);
+    if (std::abs(det) < 1.0e-12) {
+        return false;
+    }
+    const double invDet = 1.0 / det;
+    inverse[0][0] = (matrix[1][1] * matrix[2][2] - matrix[1][2] * matrix[2][1]) * invDet;
+    inverse[0][1] = (matrix[0][2] * matrix[2][1] - matrix[0][1] * matrix[2][2]) * invDet;
+    inverse[0][2] = (matrix[0][1] * matrix[1][2] - matrix[0][2] * matrix[1][1]) * invDet;
+    inverse[1][0] = (matrix[1][2] * matrix[2][0] - matrix[1][0] * matrix[2][2]) * invDet;
+    inverse[1][1] = (matrix[0][0] * matrix[2][2] - matrix[0][2] * matrix[2][0]) * invDet;
+    inverse[1][2] = (matrix[0][2] * matrix[1][0] - matrix[0][0] * matrix[1][2]) * invDet;
+    inverse[2][0] = (matrix[1][0] * matrix[2][1] - matrix[1][1] * matrix[2][0]) * invDet;
+    inverse[2][1] = (matrix[0][1] * matrix[2][0] - matrix[0][0] * matrix[2][1]) * invDet;
+    inverse[2][2] = (matrix[0][0] * matrix[1][1] - matrix[0][1] * matrix[1][0]) * invDet;
+    return true;
+}
+
 QVector3D solveFractional(const std::array<QVector3D, 3>& cell, const QVector3D& cart) {
     const QVector3D a = cell[0];
     const QVector3D b = cell[1];
@@ -269,6 +296,35 @@ StructureData makeDefaultStructure() {
     return data;
 }
 
+SupercellTransformMatrix identitySupercellTransformMatrix() {
+    return {{{{1, 0, 0}}, {{0, 1, 0}}, {{0, 0, 1}}}};
+}
+
+SupercellTransformMatrix diagonalSupercellTransformMatrix(int aMult, int bMult, int cMult) {
+    return {{{{std::max(1, aMult), 0, 0}}, {{0, std::max(1, bMult), 0}}, {{0, 0, std::max(1, cMult)}}}};
+}
+
+long long supercellTransformDeterminant(const SupercellTransformMatrix& matrix) {
+    return determinant3x3(matrix);
+}
+
+bool isIdentitySupercellTransform(const SupercellTransformMatrix& matrix) {
+    return matrix == identitySupercellTransformMatrix();
+}
+
+bool isDiagonalSupercellTransform(const SupercellTransformMatrix& matrix, std::array<int, 3>* factors) {
+    if (matrix[0][1] != 0 || matrix[0][2] != 0
+        || matrix[1][0] != 0 || matrix[1][2] != 0
+        || matrix[2][0] != 0 || matrix[2][1] != 0
+        || matrix[0][0] < 1 || matrix[1][1] < 1 || matrix[2][2] < 1) {
+        return false;
+    }
+    if (factors != nullptr) {
+        *factors = {matrix[0][0], matrix[1][1], matrix[2][2]};
+    }
+    return true;
+}
+
 StructureData makeSupercellStructure(const StructureData& source, int aMult, int bMult, int cMult) {
     const int a = std::max(1, aMult);
     const int b = std::max(1, bMult);
@@ -301,6 +357,148 @@ StructureData makeSupercellStructure(const StructureData& source, int aMult, int
             }
         }
     }
+    out.dirty = true;
+    return out;
+}
+
+StructureData makeSupercellStructure(
+    const StructureData& source,
+    const SupercellTransformMatrix& matrix,
+    QString* errorMessage)
+{
+    if (errorMessage != nullptr) {
+        errorMessage->clear();
+    }
+    constexpr long long kMaxVolumeFactor = 8000;
+    constexpr double kEpsilon = 1.0e-9;
+    const long long determinant = supercellTransformDeterminant(matrix);
+    if (determinant <= 0) {
+        if (errorMessage != nullptr) {
+            *errorMessage = QObject::tr("Supercell transform matrix must be right-handed and have a positive non-zero determinant.");
+        }
+        return source;
+    }
+    if (determinant > kMaxVolumeFactor) {
+        if (errorMessage != nullptr) {
+            *errorMessage = QObject::tr("Supercell transform volume factor %1 is too large. Use %2 or less.").arg(determinant).arg(kMaxVolumeFactor);
+        }
+        return source;
+    }
+
+    double oldFractionalToNewFractional[3][3]{};
+    double oldToNewInput[3][3]{};
+    for (int row = 0; row < 3; ++row) {
+        for (int column = 0; column < 3; ++column) {
+            oldToNewInput[row][column] = static_cast<double>(matrix[column][row]);
+        }
+    }
+    if (!invert3x3(oldToNewInput, oldFractionalToNewFractional)) {
+        if (errorMessage != nullptr) {
+            *errorMessage = QObject::tr("Supercell transform matrix is singular.");
+        }
+        return source;
+    }
+
+    StructureData out = source;
+    out.cellVectors = {
+        source.cellVectors[0] * static_cast<float>(matrix[0][0])
+            + source.cellVectors[1] * static_cast<float>(matrix[0][1])
+            + source.cellVectors[2] * static_cast<float>(matrix[0][2]),
+        source.cellVectors[0] * static_cast<float>(matrix[1][0])
+            + source.cellVectors[1] * static_cast<float>(matrix[1][1])
+            + source.cellVectors[2] * static_cast<float>(matrix[1][2]),
+        source.cellVectors[0] * static_cast<float>(matrix[2][0])
+            + source.cellVectors[1] * static_cast<float>(matrix[2][1])
+            + source.cellVectors[2] * static_cast<float>(matrix[2][2])
+    };
+
+    std::array<int, 3> minCorner{0, 0, 0};
+    std::array<int, 3> maxCorner{0, 0, 0};
+    for (int mask = 0; mask < 8; ++mask) {
+        std::array<int, 3> corner{0, 0, 0};
+        for (int newAxis = 0; newAxis < 3; ++newAxis) {
+            if ((mask & (1 << newAxis)) == 0) {
+                continue;
+            }
+            for (int oldAxis = 0; oldAxis < 3; ++oldAxis) {
+                corner[oldAxis] += matrix[newAxis][oldAxis];
+            }
+        }
+        for (int oldAxis = 0; oldAxis < 3; ++oldAxis) {
+            minCorner[oldAxis] = std::min(minCorner[oldAxis], corner[oldAxis]);
+            maxCorner[oldAxis] = std::max(maxCorner[oldAxis], corner[oldAxis]);
+        }
+    }
+
+    const std::size_t expectedAtomCount = source.atoms.size() * static_cast<std::size_t>(determinant);
+    out.atoms.clear();
+    out.atoms.reserve(expectedAtomCount);
+
+    int nextId = 1;
+    for (const auto& atom : source.atoms) {
+        const QVector3D baseFractional = solveFractional(source.cellVectors, atom.cartesian);
+        const std::array<double, 3> base{
+            static_cast<double>(baseFractional.x()),
+            static_cast<double>(baseFractional.y()),
+            static_cast<double>(baseFractional.z())
+        };
+        const int iaMin = static_cast<int>(std::floor(static_cast<double>(minCorner[0]) - base[0] - kEpsilon));
+        const int iaMax = static_cast<int>(std::ceil(static_cast<double>(maxCorner[0]) - base[0] + kEpsilon));
+        const int ibMin = static_cast<int>(std::floor(static_cast<double>(minCorner[1]) - base[1] - kEpsilon));
+        const int ibMax = static_cast<int>(std::ceil(static_cast<double>(maxCorner[1]) - base[1] + kEpsilon));
+        const int icMin = static_cast<int>(std::floor(static_cast<double>(minCorner[2]) - base[2] - kEpsilon));
+        const int icMax = static_cast<int>(std::ceil(static_cast<double>(maxCorner[2]) - base[2] + kEpsilon));
+        for (int ia = iaMin; ia <= iaMax; ++ia) {
+            for (int ib = ibMin; ib <= ibMax; ++ib) {
+                for (int ic = icMin; ic <= icMax; ++ic) {
+                    const std::array<double, 3> oldFractional{
+                        base[0] + static_cast<double>(ia),
+                        base[1] + static_cast<double>(ib),
+                        base[2] + static_cast<double>(ic)
+                    };
+                    std::array<double, 3> newFractional{};
+                    bool inside = true;
+                    for (int row = 0; row < 3; ++row) {
+                        double value = 0.0;
+                        for (int column = 0; column < 3; ++column) {
+                            value += oldFractionalToNewFractional[row][column] * oldFractional[column];
+                        }
+                        if (value < -kEpsilon || value >= 1.0 - kEpsilon) {
+                            inside = false;
+                            break;
+                        }
+                        if (value < 0.0) {
+                            value = 0.0;
+                        }
+                        newFractional[row] = value;
+                    }
+                    if (!inside) {
+                        continue;
+                    }
+                    NativeAtom copy = atom;
+                    copy.atomId = nextId++;
+                    copy.fractional = QVector3D(
+                        static_cast<float>(newFractional[0]),
+                        static_cast<float>(newFractional[1]),
+                        static_cast<float>(newFractional[2]));
+                    copy.cartesian = toCartesian(out.cellVectors, copy.fractional);
+                    copy.tag = QString("%1-%2").arg(copy.element).arg(copy.atomId, 4, 10, QChar('0'));
+                    out.atoms.push_back(copy);
+                }
+            }
+        }
+    }
+
+    if (out.atoms.size() != expectedAtomCount) {
+        if (errorMessage != nullptr) {
+            *errorMessage = QObject::tr("Supercell transform produced %1 atoms, but %2 were expected from determinant %3.")
+                .arg(out.atoms.size())
+                .arg(expectedAtomCount)
+                .arg(determinant);
+        }
+        return source;
+    }
+
     out.dirty = true;
     return out;
 }

@@ -3,7 +3,7 @@ ASEapp Surface Builder クイックスタート
 
 1. 起動
 ------
-- 単体版: ASEappSurfaceBuilder-1.2.0-Windows.exe を実行します。
+- 単体版: ASEappSurfaceBuilder-1.3.0-Windows.exe を実行します。
 - 展開版: bin\ASEappNativeUI.exe を実行します。
 - macOS DMG 版: ASEappNativeUI.app を Applications へドラッグし、右クリックまたは Control + クリックで「開く」を選びます。
 
@@ -60,6 +60,7 @@ ASEapp Surface Builder クイックスタート
 8. slab を整える
 ---------------
 - Supercell で a/b/c 方向へ拡張します。
+- 45度回転などが必要な場合は「格子変換行列を直接入力する」をオンにし、例 `[1 1 0; -1 1 0; 0 0 1]` のような 3x3 整数行列を入力します。
 - 真空層除去で c 軸方向の余分な真空を詰めます。
 - Supercell 後に真空層除去しても、倍率表示は 1x1x1 に戻りません。
 - セル軸傾きで c 軸を a/b 方向へ傾け、step-terrace 候補を作れます。
