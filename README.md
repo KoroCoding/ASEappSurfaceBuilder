@@ -10,7 +10,7 @@
 
 | やりたいこと | 最短ルート |
 | --- | --- |
-| アプリを起動したい | Windows は [`standalone_exe/windows/ASEappSurfaceBuilder-1.3.0-Windows.exe`](standalone_exe/windows/ASEappSurfaceBuilder-1.3.0-Windows.exe)、macOS は [`standalone_exe/macos/ASEappSurfaceBuilder-1.2.0-macOS.dmg`](standalone_exe/macos/ASEappSurfaceBuilder-1.2.0-macOS.dmg) を使用 |
+| アプリを起動したい | Windows は [`standalone_exe/windows/ASEappSurfaceBuilder-1.3.1-Windows.exe`](standalone_exe/windows/ASEappSurfaceBuilder-1.3.1-Windows.exe)、macOS は [`standalone_exe/macos/ASEappSurfaceBuilder-1.2.0-macOS.dmg`](standalone_exe/macos/ASEappSurfaceBuilder-1.2.0-macOS.dmg) を使用 |
 | 画面を見ながら使い方を知りたい | [操作ガイド `Guide.md`](Guide.md) を開く |
 | 自分でビルドしたい | [ソースからビルド](#ソースからビルド) を実行 |
 | 配布物を作り直したい | [`PACKAGING.md`](PACKAGING.md) を参照 |
@@ -49,13 +49,13 @@
 
 | OS | 推奨 | 備考 |
 | --- | --- | --- |
-| Windows | [`standalone_exe/windows/ASEappSurfaceBuilder-1.3.0-Windows.exe`](standalone_exe/windows/ASEappSurfaceBuilder-1.3.0-Windows.exe) | 現在同梱している Windows 版は v1.3.0 です。互換確認用として v1.2.0 / v1.1.2 / v1.1.1 / v1.1.0 / v1.0.0 も同じフォルダに残しています。 |
+| Windows | [`standalone_exe/windows/ASEappSurfaceBuilder-1.3.1-Windows.exe`](standalone_exe/windows/ASEappSurfaceBuilder-1.3.1-Windows.exe) | 現在同梱している Windows 版は v1.3.1 です。互換確認用として v1.2.0 / v1.1.2 / v1.1.1 / v1.1.0 / v1.0.0 も同じフォルダに残しています。 |
 | macOS | [`standalone_exe/macos/ASEappSurfaceBuilder-1.2.0-macOS.dmg`](standalone_exe/macos/ASEappSurfaceBuilder-1.2.0-macOS.dmg) | 現在同梱している macOS 版は v1.2.0 です。互換確認用として v1.1.0 / v1.0.0 も同じフォルダに残しています。 |
 | Linux | ソースからビルド | Qt 6 と CMake が必要です。 |
 
 ### Windows: 同梱 EXE を起動
 
-`standalone_exe/windows/ASEappSurfaceBuilder-1.3.0-Windows.exe` を実行してください。
+`standalone_exe/windows/ASEappSurfaceBuilder-1.3.1-Windows.exe` を実行してください。
 
 ### macOS
 
@@ -129,6 +129,7 @@ cmake --build code/native_ui/build --config Release --parallel 2
 - slab 全体の a/b/c 方向移動
 - セル軸傾きによる step-terrace 候補作成
 - 読み込まれている構造の全原子対距離一覧と、各 Target Å の個別ボンド長調整
+- Ga-N など同じ元素ペアの表示ボンド長を一括変更
 
 ### 前駆体・吸着分子ポーズ
 
@@ -219,8 +220,8 @@ ctest --test-dir code/native_ui/build -C Debug --output-on-failure
 | 症状 | 対処 |
 | --- | --- |
 | `freetype.dll` などが見つからない | ZIP 版は展開フォルダ全体を保ったまま起動してください。単体 EXE 版なら DLL 同梱の launcher を使えます。 |
-| `no Qt platform plugin could be initialized` が出る | v1.3.0 の再生成版では起動時に同梱 `plugins/platforms/qwindows.dll` を自動指定します。古い ZIP から `bin` だけを抜き出した場合は、ZIP 全体を展開するか単体 EXE 版を使ってください。 |
-| Windows Application Control / Smart App Control で止まる | DLL 不足ではなく Windows 側の実行制御です。広く配布する正式版は信頼済みコード署名を推奨します。 |
+| `no Qt platform plugin could be initialized` が出る | v1.3.1 の再生成版では起動時に同梱 `plugins/platforms/qwindows.dll` を自動指定します。古い ZIP から `bin` だけを抜き出した場合は、ZIP 全体を展開するか単体 EXE 版を使ってください。 |
+| Windows Application Control / Smart App Control で DLL が止まる | v1.3.0 以前の Windows launcher は第三者 DLL をローカル自己署名で再署名していたため、v1.3.1 以降を使ってください。それでも止まる場合は DLL 不足ではなく Windows 側の実行制御です。広く配布する正式版は信頼済みコード署名を推奨します。 |
 | 画面が重い | ボンド表示、ラベル、プレビューを必要な時だけ有効にし、Supercell を大きくしすぎないでください。 |
 | 原子配置位置がわかりにくい | `配置プレビューを表示` をオンにして、半透明の予定位置を確認してから `配置する` を押してください。 |
 | macOS で初回起動警告が出る | 自己署名や未notarizeのビルドでは Gatekeeper 警告が出ます。右クリックの「開く」、署名、notarization を確認してください。 |

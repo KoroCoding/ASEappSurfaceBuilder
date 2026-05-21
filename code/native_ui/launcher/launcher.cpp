@@ -1,10 +1,14 @@
 #include <windows.h>
 #include <shellapi.h>
 
+#include <algorithm>
 #include <cstdint>
 #include <filesystem>
+#include <fstream>
+#include <sstream>
 #include <string>
 #include <system_error>
+#include <vector>
 
 namespace fs = std::filesystem;
 
@@ -392,7 +396,7 @@ bool LoadResourceBytes(int resourceId, const wchar_t* resourceType, ResourceByte
 
 std::uint64_t Fnv1a64(const void* data, DWORD size) {
     const auto* bytes = static_cast<const unsigned char*>(data);
-    std::uint64_t hash = 1469598103934665603ull;
+    std::uint64_t hash = 14695981039346656037ull;
     for (DWORD i = 0; i < size; ++i) {
         hash ^= bytes[i];
         hash *= 1099511628211ull;
@@ -449,6 +453,102 @@ bool PayloadIsUsable(const fs::path& payloadRoot) {
     }
     return fs::exists(payloadRoot / L"bin\\ASEappNativeUI.exe")
         && fs::exists(payloadRoot / L"plugins\\platforms\\qwindows.dll");
+}
+
+std::wstring FromUtf8(const std::string& text) {
+    if (text.empty()) {
+        return {};
+    }
+    const int size = MultiByteToWideChar(CP_UTF8, 0, text.c_str(), static_cast<int>(text.size()), nullptr, 0);
+    if (size <= 0) {
+        return {};
+    }
+    std::wstring wide(static_cast<std::size_t>(size), L'\0');
+    MultiByteToWideChar(CP_UTF8, 0, text.c_str(), static_cast<int>(text.size()), wide.data(), size);
+    return wide;
+}
+
+std::uint64_t Fnv1a64File(const fs::path& path, bool& ok) {
+    std::ifstream file(path, std::ios::binary);
+    if (!file) {
+        ok = false;
+        return 0;
+    }
+
+    std::uint64_t hash = 14695981039346656037ull;
+    std::vector<char> buffer(1024 * 1024);
+    while (file) {
+        file.read(buffer.data(), static_cast<std::streamsize>(buffer.size()));
+        const std::streamsize read = file.gcount();
+        for (std::streamsize i = 0; i < read; ++i) {
+            hash ^= static_cast<unsigned char>(buffer[static_cast<std::size_t>(i)]);
+            hash *= 1099511628211ull;
+        }
+    }
+
+    ok = !file.bad();
+    return hash;
+}
+
+bool PayloadManifestIsValid(const fs::path& payloadRoot) {
+    const fs::path manifestPath = payloadRoot / L"ASEAPP_PAYLOAD_MANIFEST.tsv";
+    std::ifstream manifest(manifestPath, std::ios::binary);
+    if (!manifest) {
+        return false;
+    }
+
+    std::string line;
+    bool sawEntry = false;
+    while (std::getline(manifest, line)) {
+        if (!line.empty() && line.back() == '\r') {
+            line.pop_back();
+        }
+        if (line.empty() || line[0] == '#') {
+            continue;
+        }
+
+        std::istringstream row(line);
+        std::string relativeUtf8;
+        std::string sizeText;
+        std::string hashText;
+        if (!std::getline(row, relativeUtf8, '\t')
+            || !std::getline(row, sizeText, '\t')
+            || !std::getline(row, hashText, '\t')) {
+            return false;
+        }
+        std::replace(relativeUtf8.begin(), relativeUtf8.end(), '/', '\\');
+        const std::wstring relative = FromUtf8(relativeUtf8);
+        if (relative.empty() || relative.find(L"..") != std::wstring::npos || fs::path(relative).is_absolute()) {
+            return false;
+        }
+
+        unsigned long long expectedSize = 0;
+        try {
+            expectedSize = std::stoull(sizeText);
+        } catch (...) {
+            return false;
+        }
+
+        const fs::path filePath = payloadRoot / relative;
+        std::error_code error;
+        const auto actualSize = fs::file_size(filePath, error);
+        if (error || actualSize != expectedSize) {
+            return false;
+        }
+
+        bool hashOk = false;
+        const std::uint64_t actualHash = Fnv1a64File(filePath, hashOk);
+        if (!hashOk || Hex64(actualHash) != FromUtf8(hashText)) {
+            return false;
+        }
+        sawEntry = true;
+    }
+
+    return sawEntry;
+}
+
+bool CachedPayloadIsUsable(const fs::path& payloadRoot) {
+    return PayloadIsUsable(payloadRoot) && PayloadManifestIsValid(payloadRoot);
 }
 
 bool WriteResourceToFile(int resourceId, const wchar_t* resourceType, const fs::path& outputPath) {
@@ -563,7 +663,7 @@ int WINAPI wWinMain(HINSTANCE, HINSTANCE, PWSTR, int) {
         cleanupTempRoot();
     };
 
-    if (!PayloadIsUsable(payloadRoot)) {
+    if (!CachedPayloadIsUsable(payloadRoot)) {
         splash.SetStatus(L"Extracting embedded files...");
         ensureTempRoot();
         std::error_code payloadError;
@@ -630,6 +730,15 @@ int WINAPI wWinMain(HINSTANCE, HINSTANCE, PWSTR, int) {
         ShowError(L"Failed to launch ASEappNativeUI.exe.");
         cleanupTempRoot();
         return 1;
+    }
+
+    if (exitCode == 0xC0E90002) {
+        std::error_code error;
+        fs::remove_all(payloadRoot, error);
+        ShowError(
+            L"Windows blocked one of the bundled runtime DLLs while starting ASEapp. "
+            L"The cached startup files were removed so the next launch can extract a clean payload. "
+            L"Use the latest ASEappSurfaceBuilder Windows package or a trusted code-signed build.");
     }
 
     cleanupTempRoot();

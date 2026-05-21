@@ -3,7 +3,7 @@ ASEapp Surface Builder クイックスタート
 
 1. 起動
 ------
-- 単体版: ASEappSurfaceBuilder-1.3.0-Windows.exe を実行します。
+- 単体版: ASEappSurfaceBuilder-1.3.1-Windows.exe を実行します。
 - 展開版: bin\ASEappNativeUI.exe を実行します。
 - macOS DMG 版: ASEappNativeUI.app を Applications へドラッグし、右クリックまたは Control + クリックで「開く」を選びます。
 
@@ -56,6 +56,7 @@ ASEapp Surface Builder クイックスタート
 - 読み込まれている構造の全原子対が距離順に表示されます。
 - 修正したい行の Target Å を変更し、「変更済みをすべて適用」または「選択行を適用」を押します。
 - Atom A は固定され、Atom B が現在の原子対方向に沿って移動します。
+- Ga-N など同じ元素ペア全体を変える場合は「元素ペアボンド長」を開き、元素ペア・動かす元素・Target Å を指定します。
 
 8. slab を整える
 ---------------

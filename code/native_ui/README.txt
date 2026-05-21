@@ -6,7 +6,7 @@ ASEapp Surface Builder
 起動方法
 --------
 - 単体 launcher 版を使う場合:
-  ASEappSurfaceBuilder-1.3.0-Windows.exe を実行します。
+  ASEappSurfaceBuilder-1.3.1-Windows.exe を実行します。
 
 - ZIP 展開版を使う場合:
   bin\ASEappNativeUI.exe を実行します。
@@ -60,6 +60,7 @@ Ctrl+W: 現在の構造タブを閉じる
 - 配置プレビューは既定で非表示です。必要な時だけ「配置プレビューを表示」をオンにしてください。
 - 吸着分子ポーズ編集のプレビューも既定で非表示です。「ポーズプレビューを表示」をオンにし、並進 / 回転 / 結合長の対象を選ぶと、Apply 前に半透明で確認できます。
 - ツールバーの「原子対ボンド長」では、読み込まれている構造の全原子対距離を一覧し、Target Å を変更して個別にボンド長を調整できます。Atom A は固定され、Atom B が現在の原子対方向に沿って移動します。
+- 「元素ペアボンド長」では、Ga-N など同じ元素ペアの表示ボンドを選び、Target Å を一括適用できます。
 - 前駆体配置は、通常の原子配置と同じ「配置位置」「高さ/距離」「傾き角度」「比率」を使い、前駆体内で最も低い原子を配置先の原点に合わせます。
 - 通常 slab では direct c と reciprocal c* が同じ向きに見えます。c 軸が ab 面法線から傾く非直交セルでは異なる視点になります。
 - 前駆体CSV形式: name,element,dx_angstrom,dy_angstrom,dz_angstrom

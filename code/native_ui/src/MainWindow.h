@@ -80,6 +80,7 @@ private slots:
     void exportPoseJson();
     void exportPoseSnippet();
     void editBondDistances();
+    void editElementPairBondLengths();
     void syncCanvasDisplayOptions();
 
 private:

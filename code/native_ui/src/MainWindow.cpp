@@ -83,6 +83,7 @@
 #include <cstddef>
 #include <deque>
 #include <functional>
+#include <limits>
 #include <memory>
 #include <vector>
 #include <utility>
@@ -1960,6 +1961,8 @@ private:
 struct AtomPairDistance {
     int atomAId = -1;
     int atomBId = -1;
+    QString elementA;
+    QString elementB;
     QString atomALabel;
     QString atomBLabel;
     double distance = 0.0;
@@ -1970,6 +1973,40 @@ struct AtomPairLengthEdit {
     int atomAId = -1;
     int atomBId = -1;
     double targetLength = 0.0;
+};
+
+struct ElementPairBondSummary {
+    QString elementA;
+    QString elementB;
+    int bondCount = 0;
+    double minDistance = std::numeric_limits<double>::infinity();
+    double maxDistance = 0.0;
+    double totalDistance = 0.0;
+
+    double averageDistance() const {
+        return bondCount > 0 ? totalDistance / static_cast<double>(bondCount) : 0.0;
+    }
+
+    QString key() const {
+        return vestaBondKey(elementA, elementB);
+    }
+};
+
+struct ElementPairTargetedBond {
+    int fixedAtomId = -1;
+    int movedAtomId = -1;
+};
+
+struct ElementPairMoveAccumulator {
+    QVector3D desiredPositionSum;
+    int count = 0;
+};
+
+struct ElementPairBondAdjustmentResult {
+    int bondCount = 0;
+    int movedAtomCount = 0;
+    double averageResidual = 0.0;
+    double maxResidual = 0.0;
 };
 
 bool effectiveBondRangeForPairEditor(
@@ -2004,15 +2041,19 @@ std::vector<AtomPairDistance> atomPairDistancesForStructure(
         const auto& atomA = structure.atoms[i];
         for (std::size_t j = i + 1; j < structure.atoms.size(); ++j) {
             const auto& atomB = structure.atoms[j];
+            const QString elementA = vestaNormalizeElement(atomA.element);
+            const QString elementB = vestaNormalizeElement(atomB.element);
             const double distance = static_cast<double>((atomB.cartesian - atomA.cartesian).length());
             BondDistanceRange range;
-            const bool hasRange = effectiveBondRangeForPairEditor(customRanges, atomA.element, atomB.element, &range);
+            const bool hasRange = effectiveBondRangeForPairEditor(customRanges, elementA, elementB, &range);
             const bool visible = hasRange
                 && distance >= range.minDistance - 1.0e-9
                 && distance <= range.maxDistance + 1.0e-9;
             pairs.push_back(AtomPairDistance{
                 atomA.atomId,
                 atomB.atomId,
+                elementA,
+                elementB,
                 QStringLiteral("#%1 %2").arg(atomA.atomId).arg(atomA.element),
                 QStringLiteral("#%1 %2").arg(atomB.atomId).arg(atomB.element),
                 distance,
@@ -2032,6 +2073,40 @@ std::vector<AtomPairDistance> atomPairDistancesForStructure(
         return a.atomBId < b.atomBId;
     });
     return pairs;
+}
+
+std::vector<ElementPairBondSummary> elementPairBondSummariesForPairs(const std::vector<AtomPairDistance>& pairs) {
+    std::vector<ElementPairBondSummary> summaries;
+    QHash<QString, int> indexByKey;
+    for (const AtomPairDistance& pair : pairs) {
+        if (!pair.visibleBond) {
+            continue;
+        }
+        QString elementA = pair.elementA;
+        QString elementB = pair.elementB;
+        if (elementB < elementA) {
+            std::swap(elementA, elementB);
+        }
+        const QString key = vestaBondKey(elementA, elementB);
+        auto indexIt = indexByKey.constFind(key);
+        if (indexIt == indexByKey.cend()) {
+            indexByKey.insert(key, static_cast<int>(summaries.size()));
+            summaries.push_back(ElementPairBondSummary{elementA, elementB});
+            indexIt = indexByKey.constFind(key);
+        }
+        ElementPairBondSummary& summary = summaries[static_cast<std::size_t>(indexIt.value())];
+        ++summary.bondCount;
+        summary.minDistance = std::min(summary.minDistance, pair.distance);
+        summary.maxDistance = std::max(summary.maxDistance, pair.distance);
+        summary.totalDistance += pair.distance;
+    }
+    std::sort(summaries.begin(), summaries.end(), [](const ElementPairBondSummary& lhs, const ElementPairBondSummary& rhs) {
+        if (lhs.elementA != rhs.elementA) {
+            return lhs.elementA < rhs.elementA;
+        }
+        return lhs.elementB < rhs.elementB;
+    });
+    return summaries;
 }
 
 NativeAtom* findMutableAtomById(StructureData& structure, int atomId) {
@@ -2076,6 +2151,121 @@ bool adjustAtomPairBondLength(
     atomB->cartesian = atomA->cartesian + direction * static_cast<float>(targetLength);
     atomB->fractional = solveFractionalForCell(structure.cellVectors, atomB->cartesian);
     structure.dirty = true;
+    return true;
+}
+
+bool adjustElementPairBondLengths(
+    StructureData& structure,
+    const QString& fixedElementInput,
+    const QString& movedElementInput,
+    double targetLength,
+    const QHash<QString, BondDistanceRange>& customRanges,
+    ElementPairBondAdjustmentResult* result,
+    QString* errorMessage)
+{
+    if (result != nullptr) {
+        *result = ElementPairBondAdjustmentResult{};
+    }
+    if (targetLength <= 0.0 || !std::isfinite(targetLength)) {
+        if (errorMessage != nullptr) {
+            *errorMessage = QStringLiteral("Target length must be positive.");
+        }
+        return false;
+    }
+
+    const QString fixedElement = vestaNormalizeElement(fixedElementInput);
+    const QString movedElement = vestaNormalizeElement(movedElementInput);
+    QHash<int, ElementPairMoveAccumulator> movesByAtom;
+    std::vector<ElementPairTargetedBond> targetedBonds;
+    const bool sameElementPair = fixedElement == movedElement;
+
+    for (std::size_t i = 0; i < structure.atoms.size(); ++i) {
+        const NativeAtom& atomA = structure.atoms[i];
+        const QString elementA = vestaNormalizeElement(atomA.element);
+        for (std::size_t j = i + 1; j < structure.atoms.size(); ++j) {
+            const NativeAtom& atomB = structure.atoms[j];
+            const QString elementB = vestaNormalizeElement(atomB.element);
+            const bool matchesForward = elementA == fixedElement && elementB == movedElement;
+            const bool matchesReverse = elementB == fixedElement && elementA == movedElement;
+            if (!matchesForward && !matchesReverse && !(sameElementPair && elementA == fixedElement && elementB == movedElement)) {
+                continue;
+            }
+
+            const double distance = static_cast<double>((atomB.cartesian - atomA.cartesian).length());
+            BondDistanceRange range;
+            const bool hasRange = effectiveBondRangeForPairEditor(customRanges, elementA, elementB, &range);
+            if (!hasRange || distance < range.minDistance - 1.0e-9 || distance > range.maxDistance + 1.0e-9) {
+                continue;
+            }
+
+            const NativeAtom* fixedAtom = &atomA;
+            const NativeAtom* movedAtom = &atomB;
+            if (!sameElementPair && matchesReverse) {
+                fixedAtom = &atomB;
+                movedAtom = &atomA;
+            }
+
+            const QVector3D bond = movedAtom->cartesian - fixedAtom->cartesian;
+            const double currentLength = static_cast<double>(bond.length());
+            if (currentLength <= 1.0e-8) {
+                continue;
+            }
+            const QVector3D desiredPosition = fixedAtom->cartesian
+                + (bond / static_cast<float>(currentLength)) * static_cast<float>(targetLength);
+            ElementPairMoveAccumulator& move = movesByAtom[movedAtom->atomId];
+            move.desiredPositionSum += desiredPosition;
+            ++move.count;
+            targetedBonds.push_back(ElementPairTargetedBond{fixedAtom->atomId, movedAtom->atomId});
+        }
+    }
+
+    if (targetedBonds.empty() || movesByAtom.isEmpty()) {
+        if (errorMessage != nullptr) {
+            *errorMessage = QStringLiteral("No visible %1-%2 bonds were found.")
+                .arg(fixedElement, movedElement);
+        }
+        return false;
+    }
+
+    int movedAtomCount = 0;
+    for (auto it = movesByAtom.begin(); it != movesByAtom.end(); ++it) {
+        NativeAtom* atom = findMutableAtomById(structure, it.key());
+        if (atom == nullptr || it->count <= 0) {
+            continue;
+        }
+        atom->cartesian = it->desiredPositionSum / static_cast<float>(it->count);
+        atom->fractional = solveFractionalForCell(structure.cellVectors, atom->cartesian);
+        ++movedAtomCount;
+    }
+
+    if (movedAtomCount <= 0) {
+        if (errorMessage != nullptr) {
+            *errorMessage = QStringLiteral("No movable %1 atoms were found.").arg(movedElement);
+        }
+        return false;
+    }
+
+    double residualSum = 0.0;
+    double maxResidual = 0.0;
+    for (const ElementPairTargetedBond& bond : targetedBonds) {
+        const NativeAtom* fixedAtom = findMutableAtomById(structure, bond.fixedAtomId);
+        const NativeAtom* movedAtom = findMutableAtomById(structure, bond.movedAtomId);
+        if (fixedAtom == nullptr || movedAtom == nullptr) {
+            continue;
+        }
+        const double distance = static_cast<double>((movedAtom->cartesian - fixedAtom->cartesian).length());
+        const double residual = std::abs(distance - targetLength);
+        residualSum += residual;
+        maxResidual = std::max(maxResidual, residual);
+    }
+
+    structure.dirty = true;
+    if (result != nullptr) {
+        result->bondCount = static_cast<int>(targetedBonds.size());
+        result->movedAtomCount = movedAtomCount;
+        result->averageResidual = residualSum / static_cast<double>(targetedBonds.size());
+        result->maxResidual = maxResidual;
+    }
     return true;
 }
 
@@ -2197,6 +2387,142 @@ private:
     std::vector<AtomPairDistance> m_pairs;
     QTableWidget* m_table = nullptr;
     ApplyMode m_applyMode = ApplyMode::None;
+};
+
+class ElementPairBondLengthDialog final : public QDialog {
+public:
+    ElementPairBondLengthDialog(bool japanese, std::vector<ElementPairBondSummary> summaries, QWidget* parent = nullptr)
+        : QDialog(parent),
+          m_japanese(japanese),
+          m_summaries(std::move(summaries))
+    {
+        setWindowTitle(japanese ? QStringLiteral("元素ペアボンド長") : QStringLiteral("Element-pair bond lengths"));
+        auto* layout = new QVBoxLayout(this);
+        auto* note = new QLabel(japanese
+            ? QStringLiteral("Ga-N など同じ元素ペアの表示ボンド長をまとめて変更します。固定する元素を残し、動かす元素側を各ボンド方向へ移動します。")
+            : QStringLiteral("Change visible bonds for one element pair, such as Ga-N, in one operation. The fixed element stays in place while the moved element is shifted along each bond direction."),
+            this);
+        note->setWordWrap(true);
+        layout->addWidget(note);
+
+        m_pairCombo = new QComboBox(this);
+        for (const ElementPairBondSummary& summary : m_summaries) {
+            m_pairCombo->addItem(summaryLabel(summary), summary.key());
+        }
+        m_moveElementCombo = new QComboBox(this);
+        m_targetLength = new QDoubleSpinBox(this);
+        m_targetLength->setRange(0.01, 40.0);
+        m_targetLength->setDecimals(4);
+        m_targetLength->setSingleStep(0.01);
+        m_targetLength->setSuffix(QStringLiteral(" Å"));
+        m_statusLabel = new QLabel(this);
+        m_statusLabel->setWordWrap(true);
+
+        auto* form = new QFormLayout();
+        form->addRow(japanese ? QStringLiteral("元素ペア") : QStringLiteral("Element pair"), m_pairCombo);
+        form->addRow(japanese ? QStringLiteral("動かす元素") : QStringLiteral("Moved element"), m_moveElementCombo);
+        form->addRow(QStringLiteral("Target Å"), m_targetLength);
+        layout->addLayout(form);
+        layout->addWidget(m_statusLabel);
+
+        connect(m_pairCombo, QOverload<int>::of(&QComboBox::currentIndexChanged), this, [this]() { refreshPair(); });
+        connect(m_moveElementCombo, QOverload<int>::of(&QComboBox::currentIndexChanged), this, [this]() { refreshStatus(); });
+        refreshPair();
+
+        auto* buttons = new QDialogButtonBox(QDialogButtonBox::Ok | QDialogButtonBox::Cancel, this);
+        connect(buttons, &QDialogButtonBox::accepted, this, &QDialog::accept);
+        connect(buttons, &QDialogButtonBox::rejected, this, &QDialog::reject);
+        layout->addWidget(buttons);
+        resize(540, 260);
+    }
+
+    QString fixedElement() const {
+        const ElementPairBondSummary* summary = currentSummary();
+        if (summary == nullptr) {
+            return {};
+        }
+        const QString moved = movedElement();
+        return moved == summary->elementA ? summary->elementB : summary->elementA;
+    }
+
+    QString movedElement() const {
+        return m_moveElementCombo != nullptr ? vestaNormalizeElement(m_moveElementCombo->currentText()) : QString();
+    }
+
+    double targetLength() const {
+        return m_targetLength != nullptr ? m_targetLength->value() : 0.0;
+    }
+
+    QString pairText() const {
+        const ElementPairBondSummary* summary = currentSummary();
+        return summary != nullptr
+            ? QStringLiteral("%1-%2").arg(summary->elementA, summary->elementB)
+            : QString();
+    }
+
+private:
+    QString summaryLabel(const ElementPairBondSummary& summary) const {
+        return QStringLiteral("%1-%2  (%3, avg %4 Å, %5-%6 Å)")
+            .arg(summary.elementA, summary.elementB)
+            .arg(m_japanese ? QStringLiteral("%1 本").arg(summary.bondCount) : QStringLiteral("%1 bonds").arg(summary.bondCount))
+            .arg(summary.averageDistance(), 0, 'f', 4)
+            .arg(summary.minDistance, 0, 'f', 4)
+            .arg(summary.maxDistance, 0, 'f', 4);
+    }
+
+    const ElementPairBondSummary* currentSummary() const {
+        if (m_pairCombo == nullptr) {
+            return nullptr;
+        }
+        const int index = m_pairCombo->currentIndex();
+        if (index < 0 || index >= static_cast<int>(m_summaries.size())) {
+            return nullptr;
+        }
+        return &m_summaries[static_cast<std::size_t>(index)];
+    }
+
+    void refreshPair() {
+        const ElementPairBondSummary* summary = currentSummary();
+        if (summary == nullptr) {
+            return;
+        }
+        const QSignalBlocker blocker(m_moveElementCombo);
+        m_moveElementCombo->clear();
+        m_moveElementCombo->addItem(summary->elementA);
+        if (summary->elementB != summary->elementA) {
+            m_moveElementCombo->addItem(summary->elementB);
+            m_moveElementCombo->setCurrentText(summary->elementB);
+        }
+        m_targetLength->setValue(std::clamp(summary->averageDistance(), m_targetLength->minimum(), m_targetLength->maximum()));
+        refreshStatus();
+    }
+
+    void refreshStatus() {
+        const ElementPairBondSummary* summary = currentSummary();
+        if (summary == nullptr || m_statusLabel == nullptr) {
+            return;
+        }
+        const QString moved = movedElement();
+        const QString fixed = moved == summary->elementA ? summary->elementB : summary->elementA;
+        m_statusLabel->setText(m_japanese
+            ? QStringLiteral("対象: %1-%2 表示ボンド %3 本 / 現在平均 %4 Å。%5 を固定し、%6 側を移動します。")
+                .arg(summary->elementA, summary->elementB)
+                .arg(summary->bondCount)
+                .arg(summary->averageDistance(), 0, 'f', 4)
+                .arg(fixed, moved)
+            : QStringLiteral("Target: %1-%2 visible bonds: %3 / current average %4 Å. %5 stays fixed; %6 moves.")
+                .arg(summary->elementA, summary->elementB)
+                .arg(summary->bondCount)
+                .arg(summary->averageDistance(), 0, 'f', 4)
+                .arg(fixed, moved));
+    }
+
+    bool m_japanese = true;
+    std::vector<ElementPairBondSummary> m_summaries;
+    QComboBox* m_pairCombo = nullptr;
+    QComboBox* m_moveElementCombo = nullptr;
+    QDoubleSpinBox* m_targetLength = nullptr;
+    QLabel* m_statusLabel = nullptr;
 };
 
 QString selectionText(const std::vector<int>& atomIds, bool japanese) {
@@ -2556,6 +2882,8 @@ QString MainWindow::uiText(const QString& key) const {
         if (key == "outside_cell_tip") return QStringLiteral("VESTA風に周期境界でつながる格子外の複製原子とボンドを表示/非表示します。");
         if (key == "bond_distances") return QStringLiteral("原子対ボンド長");
         if (key == "bond_distances_tip") return QStringLiteral("読み込まれている構造の全原子対距離を一覧し、Target Å を指定して個別に修正します。");
+        if (key == "element_pair_bond_lengths") return QStringLiteral("元素ペアボンド長");
+        if (key == "element_pair_bond_lengths_tip") return QStringLiteral("Ga-N など同じ元素ペアの表示ボンド長をまとめて変更します。");
         if (key == "axes") return QStringLiteral("軸");
         if (key == "labels") return QStringLiteral("ラベル");
         if (key == "perspective") return QStringLiteral("透視投影");
@@ -2647,6 +2975,8 @@ QString MainWindow::uiText(const QString& key) const {
         if (key == "outside_cell_tip") return QStringLiteral("Show or hide VESTA-like periodic image atoms and bonds outside the unit cell.");
         if (key == "bond_distances") return QStringLiteral("Atom-pair lengths");
         if (key == "bond_distances_tip") return QStringLiteral("List every atom-pair distance in the loaded structure and edit each Target Å individually.");
+        if (key == "element_pair_bond_lengths") return QStringLiteral("Element-pair lengths");
+        if (key == "element_pair_bond_lengths_tip") return QStringLiteral("Change all visible bonds for one element pair, such as Ga-N, in one operation.");
         if (key == "axes") return QStringLiteral("Axes");
         if (key == "labels") return QStringLiteral("Labels");
         if (key == "perspective") return QStringLiteral("Perspective");
@@ -3175,6 +3505,10 @@ void MainWindow::buildUi() {
     bondDistanceButton->setToolTip(uiText(QStringLiteral("bond_distances_tip")));
     connect(bondDistanceButton, &QPushButton::clicked, this, &MainWindow::editBondDistances);
     displayLayout->addWidget(bondDistanceButton);
+    auto* elementPairBondButton = new QPushButton(uiText(QStringLiteral("element_pair_bond_lengths")), displayGroup);
+    elementPairBondButton->setToolTip(uiText(QStringLiteral("element_pair_bond_lengths_tip")));
+    connect(elementPairBondButton, &QPushButton::clicked, this, &MainWindow::editElementPairBondLengths);
+    displayLayout->addWidget(elementPairBondButton);
     m_atomScaleSpin = new QDoubleSpinBox();
     m_atomScaleSpin->setRange(60.0, 180.0);
     m_atomScaleSpin->setValue(100.0);
@@ -3299,6 +3633,9 @@ void MainWindow::buildUi() {
     m_bondDistanceAction = toolbar->addAction(uiText(QStringLiteral("bond_distances")));
     m_bondDistanceAction->setToolTip(uiText(QStringLiteral("bond_distances_tip")));
     connect(m_bondDistanceAction, &QAction::triggered, this, &MainWindow::editBondDistances);
+    auto* elementPairBondAction = toolbar->addAction(uiText(QStringLiteral("element_pair_bond_lengths")));
+    elementPairBondAction->setToolTip(uiText(QStringLiteral("element_pair_bond_lengths_tip")));
+    connect(elementPairBondAction, &QAction::triggered, this, &MainWindow::editElementPairBondLengths);
     m_showAxesAction = toolbar->addAction(uiText(QStringLiteral("axes"))); m_showAxesAction->setCheckable(true); m_showAxesAction->setChecked(true);
     m_showAxesAction->setToolTip("Show or hide the XYZ axes.");
     connect(m_showAxesAction, &QAction::toggled, m_showAxesCheck, &QCheckBox::setChecked);
@@ -5494,6 +5831,65 @@ void MainWindow::editBondDistances() {
     }
 }
 
+void MainWindow::editElementPairBondLengths() {
+    const auto pairs = atomPairDistancesForStructure(m_structure, m_customBondRanges);
+    const auto summaries = elementPairBondSummariesForPairs(pairs);
+    if (summaries.empty()) {
+        QMessageBox::information(
+            this,
+            m_japanese ? QStringLiteral("元素ペアボンド長") : QStringLiteral("Element-pair bond lengths"),
+            m_japanese
+                ? QStringLiteral("表示ボンドとして判定されている元素ペアがありません。先に構造を読み込むか、ボンド距離設定を確認してください。")
+                : QStringLiteral("No visible element-pair bonds are available. Load a structure first, or check the bond distance settings."));
+        return;
+    }
+
+    ElementPairBondLengthDialog dialog(m_japanese, summaries, this);
+    if (dialog.exec() != QDialog::Accepted) {
+        return;
+    }
+
+    ElementPairBondAdjustmentResult result;
+    QString error;
+    pushUndoState(QStringLiteral("element_pair_bond_lengths"));
+    if (!adjustElementPairBondLengths(
+            m_structure,
+            dialog.fixedElement(),
+            dialog.movedElement(),
+            dialog.targetLength(),
+            m_customBondRanges,
+            &result,
+            &error)) {
+        if (!m_undoStack.empty()) {
+            m_undoStack.pop_back();
+        }
+        updateUndoRedoActions();
+        QMessageBox::warning(
+            this,
+            m_japanese ? QStringLiteral("元素ペアボンド長") : QStringLiteral("Element-pair bond lengths"),
+            error.isEmpty()
+                ? (m_japanese ? QStringLiteral("元素ペアボンド長を変更できませんでした。") : QStringLiteral("Element-pair bond lengths could not be changed."))
+                : error);
+        return;
+    }
+
+    applyStructureState(m_structure);
+    statusBar()->showMessage(m_japanese
+        ? QStringLiteral("%1 を %2 Å に一括変更しました: ボンド %3 本 / 移動原子 %4 個 / 最大誤差 %5 Å")
+            .arg(dialog.pairText())
+            .arg(dialog.targetLength(), 0, 'f', 4)
+            .arg(result.bondCount)
+            .arg(result.movedAtomCount)
+            .arg(result.maxResidual, 0, 'f', 4)
+        : QStringLiteral("Updated %1 to %2 Å: %3 bonds / %4 moved atoms / max residual %5 Å")
+            .arg(dialog.pairText())
+            .arg(dialog.targetLength(), 0, 'f', 4)
+            .arg(result.bondCount)
+            .arg(result.movedAtomCount)
+            .arg(result.maxResidual, 0, 'f', 4),
+        6000);
+}
+
 void MainWindow::syncCanvasDisplayOptions() {
     StructureCanvas::DisplayOptions options = m_canvas->displayOptions();
     options.showCell = m_showCellCheck->isChecked();
@@ -6304,6 +6700,41 @@ bool MainWindow::runAdsorbatePoseSelfTest(const QString& outputDirectory, QStrin
     }
     m_customBondRanges.clear();
     syncCanvasDisplayOptions();
+
+    StructureData bulkBondStructure;
+    bulkBondStructure.title = QStringLiteral("ASEapp element-pair bond length self-test");
+    bulkBondStructure.cellVectors = {
+        QVector3D(30.0f, 0.0f, 0.0f),
+        QVector3D(0.0f, 30.0f, 0.0f),
+        QVector3D(0.0f, 0.0f, 30.0f)
+    };
+    bulkBondStructure.atoms = {
+        selfTestAtom(bulkBondStructure, 1, QStringLiteral("Ga"), QVector3D(0.0f, 0.0f, 0.0f), QStringLiteral("bulk-Ga-0001")),
+        selfTestAtom(bulkBondStructure, 2, QStringLiteral("N"), QVector3D(2.0f, 0.0f, 0.0f), QStringLiteral("bulk-N-0002")),
+        selfTestAtom(bulkBondStructure, 3, QStringLiteral("Ga"), QVector3D(10.0f, 0.0f, 0.0f), QStringLiteral("bulk-Ga-0003")),
+        selfTestAtom(bulkBondStructure, 4, QStringLiteral("N"), QVector3D(12.0f, 0.0f, 0.0f), QStringLiteral("bulk-N-0004"))
+    };
+    QHash<QString, BondDistanceRange> bulkBondRanges;
+    bulkBondRanges.insert(vestaBondKey(QStringLiteral("Ga"), QStringLiteral("N")), BondDistanceRange{0.0, 3.0});
+    ElementPairBondAdjustmentResult bulkBondResult;
+    QString bulkBondError;
+    if (!adjustElementPairBondLengths(
+            bulkBondStructure,
+            QStringLiteral("Ga"),
+            QStringLiteral("N"),
+            1.6,
+            bulkBondRanges,
+            &bulkBondResult,
+            &bulkBondError)) {
+        return fail(QStringLiteral("Element-pair Ga-N bulk bond length adjustment failed: %1").arg(bulkBondError));
+    }
+    if (!require(bulkBondResult.bondCount == 2
+            && bulkBondResult.movedAtomCount == 2
+            && close(atomDistance(bulkBondStructure, 1, 2), 1.6)
+            && close(atomDistance(bulkBondStructure, 3, 4), 1.6),
+            QStringLiteral("element-pair bond length adjustment updates all visible Ga-N bonds in one operation"))) {
+        return fail(QStringLiteral("Element-pair Ga-N bulk bond length adjustment did not reach the target."));
+    }
 
     const StructureData poseStructureAfterBondRangeCheck = m_structure;
     StructureData matrixSupercellBase;

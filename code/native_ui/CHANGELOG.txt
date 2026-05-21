@@ -3,6 +3,13 @@ ASEapp Surface Builder CHANGELOG
 
 Unreleased
 ----------
+- Added an element-pair bond length editor for bulk changes such as applying one target length to all visible Ga-N bonds.
+
+Version 1.3.1 - Windows Smart App Control packaging fix
+----------------------------------------------------------
+- Rebuilt the Windows launcher/ZIP without re-signing third-party Qt/OpenSSL runtime DLLs, preserving their original file hashes for Smart App Control reputation checks.
+- Added a payload manifest so cached standalone startup files are validated before reuse and stale/corrupt caches are re-extracted.
+- Kept first-party ASEapp executables signed with the local development certificate when available.
 
 Version 1.3.0 - Matrix supercell transforms
 ------------------------------------------------

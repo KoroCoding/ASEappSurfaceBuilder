@@ -1,5 +1,5 @@
 param(
-    [string]$Version = '1.3.0',
+    [string]$Version = '1.3.1',
     [string]$ZipPath = '',
     [string]$OutputExe = '',
     [string]$SignCertThumbprint = $env:ASEAPP_CODESIGN_THUMBPRINT,
@@ -77,16 +77,65 @@ function Sign-IfNeeded([string]$path) {
     }
 }
 
-function Sign-PayloadBinaries([string]$root) {
+function Sign-FirstPartyPayloadBinaries([string]$root) {
     if (-not $signingCert) {
         return
     }
 
-    Get-ChildItem -LiteralPath $root -Recurse -File |
-        Where-Object { $_.Extension -in '.exe', '.dll' } |
+    Get-ChildItem -LiteralPath (Join-Path $root 'bin') -File -Filter 'ASEapp*.exe' -ErrorAction SilentlyContinue |
         ForEach-Object {
             Sign-IfNeeded $_.FullName
         }
+}
+
+if (-not ('AseappFnv1a64' -as [type])) {
+    Add-Type -TypeDefinition @'
+using System;
+using System.IO;
+
+public static class AseappFnv1a64
+{
+    public static string HashFile(string path)
+    {
+        const ulong offset = 14695981039346656037UL;
+        const ulong prime = 1099511628211UL;
+        ulong hash = offset;
+        byte[] buffer = new byte[1024 * 1024];
+        using (FileStream stream = File.OpenRead(path))
+        {
+            int read;
+            while ((read = stream.Read(buffer, 0, buffer.Length)) > 0)
+            {
+                for (int i = 0; i < read; ++i)
+                {
+                    hash ^= buffer[i];
+                    hash *= prime;
+                }
+            }
+        }
+        return hash.ToString("x16");
+    }
+}
+'@
+}
+
+function Write-PayloadManifest([string]$root) {
+    $manifestPath = Join-Path $root 'ASEAPP_PAYLOAD_MANIFEST.tsv'
+    $rootFull = [System.IO.Path]::GetFullPath($root).TrimEnd('\')
+    $lines = New-Object System.Collections.Generic.List[string]
+    $lines.Add('# ASEapp payload manifest v1')
+    Get-ChildItem -LiteralPath $root -Recurse -File |
+        Where-Object { $_.FullName -ne $manifestPath } |
+        Sort-Object FullName |
+        ForEach-Object {
+            $fileFull = [System.IO.Path]::GetFullPath($_.FullName)
+            if (-not $fileFull.StartsWith($rootFull + '\', [System.StringComparison]::OrdinalIgnoreCase)) {
+                throw "Manifest input is outside the payload root: $fileFull"
+            }
+            $relative = $fileFull.Substring($rootFull.Length + 1).Replace('\', '/')
+            $lines.Add(("{0}`t{1}`t{2}" -f $relative, $_.Length, [AseappFnv1a64]::HashFile($_.FullName)))
+        }
+    Set-Content -LiteralPath $manifestPath -Value $lines -Encoding ASCII
 }
 
 $msvcRoot = 'C:\Program Files\Microsoft Visual Studio\2022\Community\VC\Tools\MSVC'
@@ -179,7 +228,8 @@ try {
     Expand-Archive -LiteralPath $zipPath -DestinationPath $payloadRoot -Force
     $binDir = Join-Path $payloadRoot 'bin'
     Copy-RuntimeDlls $binDir
-    Sign-PayloadBinaries $payloadRoot
+    Sign-FirstPartyPayloadBinaries $payloadRoot
+    Write-PayloadManifest $payloadRoot
 
     $payloadZip = Join-Path $stagingRoot 'payload.zip'
     & 'C:\Program Files\7-Zip\7z.exe' a -tzip -mx=9 -mmt=on -y $payloadZip (Join-Path $payloadRoot '*') | Out-Host
