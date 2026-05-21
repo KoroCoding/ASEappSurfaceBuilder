@@ -3,7 +3,13 @@ ASEapp Surface Builder CHANGELOG
 
 Unreleased
 ----------
-- Added an element-pair bond length editor for bulk changes such as applying one target length to all visible Ga-N bonds.
+
+Version 1.3.2 - Bond display cutoff and macOS startup fix
+---------------------------------------------------------
+- Changed the primary bond display UI to edit only the maximum displayed bond distance for each species pair, such as Ga-N, Ga-H, and N-H.
+- Kept element-pair rows ordered by the element order in the loaded structure instead of alphabetic order.
+- Added a GUI self-test that verifies Ga/N/H structures collapse to Ga-N, Ga-H, and N-H summaries and that lowering a display cutoff hides bonds without moving atoms.
+- Added a macOS startup splash screen that appears before the main window is ready.
 
 Version 1.3.1 - Windows Smart App Control packaging fix
 ----------------------------------------------------------

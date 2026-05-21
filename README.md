@@ -10,7 +10,7 @@
 
 | やりたいこと | 最短ルート |
 | --- | --- |
-| アプリを起動したい | Windows は [`standalone_exe/windows/ASEappSurfaceBuilder-1.3.1-Windows.exe`](standalone_exe/windows/ASEappSurfaceBuilder-1.3.1-Windows.exe)、macOS は [`standalone_exe/macos/ASEappSurfaceBuilder-1.2.0-macOS.dmg`](standalone_exe/macos/ASEappSurfaceBuilder-1.2.0-macOS.dmg) を使用 |
+| アプリを起動したい | Windows は [`standalone_exe/windows/ASEappSurfaceBuilder-1.3.1-Windows.exe`](standalone_exe/windows/ASEappSurfaceBuilder-1.3.1-Windows.exe)、macOS は [`standalone_exe/macos/ASEappSurfaceBuilder-1.3.2-macOS.dmg`](standalone_exe/macos/ASEappSurfaceBuilder-1.3.2-macOS.dmg) を使用 |
 | 画面を見ながら使い方を知りたい | [操作ガイド `Guide.md`](Guide.md) を開く |
 | 自分でビルドしたい | [ソースからビルド](#ソースからビルド) を実行 |
 | 配布物を作り直したい | [`PACKAGING.md`](PACKAGING.md) を参照 |
@@ -50,7 +50,7 @@
 | OS | 推奨 | 備考 |
 | --- | --- | --- |
 | Windows | [`standalone_exe/windows/ASEappSurfaceBuilder-1.3.1-Windows.exe`](standalone_exe/windows/ASEappSurfaceBuilder-1.3.1-Windows.exe) | 現在同梱している Windows 版は v1.3.1 です。互換確認用として v1.2.0 / v1.1.2 / v1.1.1 / v1.1.0 / v1.0.0 も同じフォルダに残しています。 |
-| macOS | [`standalone_exe/macos/ASEappSurfaceBuilder-1.2.0-macOS.dmg`](standalone_exe/macos/ASEappSurfaceBuilder-1.2.0-macOS.dmg) | 現在同梱している macOS 版は v1.2.0 です。互換確認用として v1.1.0 / v1.0.0 も同じフォルダに残しています。 |
+| macOS | [`standalone_exe/macos/ASEappSurfaceBuilder-1.3.2-macOS.dmg`](standalone_exe/macos/ASEappSurfaceBuilder-1.3.2-macOS.dmg) | 現在同梱している macOS 版は v1.3.2 です。互換確認用として v1.2.0 / v1.1.0 / v1.0.0 も同じフォルダに残しています。 |
 | Linux | ソースからビルド | Qt 6 と CMake が必要です。 |
 
 ### Windows: 同梱 EXE を起動
@@ -59,7 +59,7 @@
 
 ### macOS
 
-最新の macOS 版は `standalone_exe/macos/ASEappSurfaceBuilder-1.2.0-macOS.dmg` です。過去版として `ASEappSurfaceBuilder-1.1.0-macOS.dmg` と `ASEappSurfaceBuilder-1.0.0-macOS.dmg` も同じフォルダに残しています。
+最新の macOS 版は `standalone_exe/macos/ASEappSurfaceBuilder-1.3.2-macOS.dmg` です。過去版として `ASEappSurfaceBuilder-1.2.0-macOS.dmg`、`ASEappSurfaceBuilder-1.1.0-macOS.dmg`、`ASEappSurfaceBuilder-1.0.0-macOS.dmg` も同じフォルダに残しています。
 
 DMG には `ASEappNativeUI.app`、Applications へのリンク、自己署名証明書、初回起動補助用の `ASEapp-macOS-Allow-This-App.command`、macOS 向け README を含めています。Developer ID + Notarization ではない自己署名版なので、初回起動時に Gatekeeper の警告が出る場合があります。macOS の `.dmg` 作成・署名・notarization の考え方は [`PACKAGING.md`](PACKAGING.md) に分けています。
 
@@ -128,8 +128,7 @@ cmake --build code/native_ui/build --config Release --parallel 2
 - 真空層の追加・除去
 - slab 全体の a/b/c 方向移動
 - セル軸傾きによる step-terrace 候補作成
-- 読み込まれている構造の全原子対距離一覧と、各 Target Å の個別ボンド長調整
-- Ga-N など同じ元素ペアの表示ボンド長を一括変更
+- Ga-N、Ga-H、N-H など原子種ペアごとに表示ボンドの最大距離を変更
 
 ### 前駆体・吸着分子ポーズ
 

@@ -21,16 +21,17 @@ standalone_exe/                          # 確認済み配布物の配置先
 - Windows: `standalone_exe/windows/ASEappSurfaceBuilder-1.1.1-Windows.exe`
 - Windows: `standalone_exe/windows/ASEappSurfaceBuilder-1.1.0-Windows.exe`
 - Windows: `standalone_exe/windows/ASEappSurfaceBuilder-1.0.0-Windows.exe`
+- macOS: `standalone_exe/macos/ASEappSurfaceBuilder-1.3.2-macOS.dmg`
 - macOS: `standalone_exe/macos/ASEappSurfaceBuilder-1.2.0-macOS.dmg`
 - macOS: `standalone_exe/macos/ASEappSurfaceBuilder-1.1.0-macOS.dmg`
 - macOS: `standalone_exe/macos/ASEappSurfaceBuilder-1.0.0-macOS.dmg`
 
 次回以降の GitHub Releases には次の名前でアップロードします。
 
-- Windows 単体 launcher: `ASEappSurfaceBuilder-1.3.1-Windows.exe`
-- Windows ZIP: `ASEappSurfaceBuilder-1.3.1-Windows.zip`
-- Linux: `ASEappSurfaceBuilder-1.3.1-Linux.tar.gz`
-- macOS: `ASEappSurfaceBuilder-1.3.1-macOS.dmg`
+- Windows 単体 launcher: `ASEappSurfaceBuilder-1.3.2-Windows.exe`
+- Windows ZIP: `ASEappSurfaceBuilder-1.3.2-Windows.zip`
+- Linux: `ASEappSurfaceBuilder-1.3.2-Linux.tar.gz`
+- macOS: `ASEappSurfaceBuilder-1.3.2-macOS.dmg`
 
 配布物はローカルでは `standalone_exe/` や `code/native_ui/dist/` に生成します。確認済みの最終成果物だけを `standalone_exe/<platform>/` に置き、途中生成物はコミットしません。
 
@@ -73,7 +74,7 @@ powershell -ExecutionPolicy Bypass -File code/native_ui/package_windows_launcher
 `package_windows_launcher.ps1` は、既定で次を作成します。
 
 ```text
-standalone_exe/windows/ASEappSurfaceBuilder-1.3.1-Windows.exe
+standalone_exe/windows/ASEappSurfaceBuilder-1.3.2-Windows.exe
 ```
 
 現在このリポジトリに同梱している Windows 版は `standalone_exe/windows/ASEappSurfaceBuilder-1.3.1-Windows.exe` です。互換確認用として `standalone_exe/windows/ASEappSurfaceBuilder-1.2.0-Windows.exe`、`standalone_exe/windows/ASEappSurfaceBuilder-1.1.2-Windows.exe`、`standalone_exe/windows/ASEappSurfaceBuilder-1.1.1-Windows.exe`、`standalone_exe/windows/ASEappSurfaceBuilder-1.1.0-Windows.exe`、`standalone_exe/windows/ASEappSurfaceBuilder-1.0.0-Windows.exe` も残しています。
@@ -99,7 +100,7 @@ powershell -ExecutionPolicy Bypass -File code/native_ui/package_windows_launcher
 ## 展開版を確認する
 
 ```powershell
-$zip = (Resolve-Path 'code/native_ui/dist/ASEappSurfaceBuilder-1.3.1-Windows.zip').Path
+$zip = (Resolve-Path 'code/native_ui/dist/ASEappSurfaceBuilder-1.3.2-Windows.zip').Path
 $target = Join-Path $env:TEMP 'aseapp_surface_builder_verify'
 if (Test-Path $target) { Remove-Item -LiteralPath $target -Recurse -Force }
 Expand-Archive -LiteralPath $zip -DestinationPath $target -Force
@@ -132,10 +133,10 @@ macOS では次のスクリプトを使ってください。
 ./code/native_ui/package_macos.sh
 ```
 
-このスクリプトは、Release ビルド、Qt ランタイム同梱、自己署名、DMG 作成、署名検証、DMG 検証をまとめて実行します。`project(... VERSION ...)` の値に合わせてファイル名が決まり、v1.3.1 では次を作成します。
+このスクリプトは、Release ビルド、Qt ランタイム同梱、自己署名、DMG 作成、署名検証、DMG 検証をまとめて実行します。`project(... VERSION ...)` の値に合わせてファイル名が決まり、v1.3.2 では次を作成します。
 
 ```text
-standalone_exe/macos/ASEappSurfaceBuilder-1.3.1-macOS.dmg
+standalone_exe/macos/ASEappSurfaceBuilder-1.3.2-macOS.dmg
 ```
 
 互換確認用として `standalone_exe/macos/ASEappSurfaceBuilder-1.2.0-macOS.dmg`、`standalone_exe/macos/ASEappSurfaceBuilder-1.1.0-macOS.dmg`、`standalone_exe/macos/ASEappSurfaceBuilder-1.0.0-macOS.dmg` も残しています。

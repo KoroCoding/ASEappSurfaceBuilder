@@ -24,5 +24,3 @@ v1.3.1 は、v1.3.0 の Windows 単体 launcher / ZIP の packaging 修正版で
 - ZIP payload inspection
 - Authenticode 状態確認
 - Windows Smart App Control / Code Integrity event 差分確認つきの起動 smoke test
-
-- `元素ペアボンド長` を追加し、Ga-N など同じ元素ペアの表示ボンド長を Target Å で一括変更できるようにしました。
