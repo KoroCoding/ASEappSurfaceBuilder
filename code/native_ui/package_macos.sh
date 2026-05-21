@@ -10,6 +10,49 @@ stage_dir="${ASEAPP_MACOS_STAGE_DIR:-/private/tmp/aseapp-surface-builder-cpack}"
 parallel="${ASEAPP_BUILD_PARALLEL:-$(sysctl -n hw.ncpu 2>/dev/null || echo 2)}"
 default_identity="ASEapp Surface Builder Local Code Signing"
 
+apply_dmg_volume_icon() {
+  local source_dmg="$1"
+  local icon_path="$2"
+
+  if [[ ! -f "${icon_path}" ]]; then
+    echo "DMG volume icon was not found: ${icon_path}" >&2
+    printf '%s\n' "${source_dmg}"
+    return 0
+  fi
+  if ! command -v SetFile >/dev/null 2>&1; then
+    echo "SetFile was not found; skipping DMG volume icon." >&2
+    printf '%s\n' "${source_dmg}"
+    return 0
+  fi
+
+  local source_base
+  source_base="$(basename "${source_dmg}" .dmg)"
+  local rw_base="${stage_dir}/${source_base}-volume-icon-rw"
+  local rw_dmg="${rw_base}.dmg"
+  local final_base="${stage_dir}/${source_base}-volume-icon"
+  local final_dmg="${final_base}.dmg"
+  local mount_dir="${stage_dir}/volume-icon-mount"
+
+  rm -rf "${mount_dir}"
+  rm -f "${rw_dmg}" "${final_dmg}"
+  mkdir -p "${mount_dir}"
+
+  hdiutil convert "${source_dmg}" -format UDRW -o "${rw_base}" >/dev/null
+  hdiutil attach -nobrowse -readwrite -mountpoint "${mount_dir}" "${rw_dmg}" >/dev/null
+
+  cp "${icon_path}" "${mount_dir}/.VolumeIcon.icns"
+  SetFile -c icnC "${mount_dir}/.VolumeIcon.icns" || true
+  SetFile -a C "${mount_dir}" || true
+  sync
+
+  hdiutil detach "${mount_dir}" >/dev/null
+  hdiutil convert "${rw_dmg}" -format UDZO -imagekey zlib-level=9 -o "${final_base}" >/dev/null
+  rm -f "${rw_dmg}"
+  mv -f "${final_dmg}" "${source_dmg}"
+
+  printf '%s\n' "${source_dmg}"
+}
+
 if command -v conda >/dev/null 2>&1; then
   run_cmd=(conda run -n "${env_name}")
   env_prefix="$("${run_cmd[@]}" python -c 'import os; print(os.environ["CONDA_PREFIX"])')"
@@ -63,6 +106,8 @@ if [[ -z "${app_path}" || -z "${dmg_path}" ]]; then
 fi
 
 codesign --verify --deep --strict --verbose=2 "${app_path}"
+dmg_icon_path="${build_dir}/generated/icons/aseapp_surface_builder_icon.icns"
+dmg_path="$(apply_dmg_volume_icon "${dmg_path}" "${dmg_icon_path}")"
 hdiutil verify "${dmg_path}" >/dev/null
 
 if [[ -n "${ASEAPP_CODESIGN_IDENTITY:-}" && "${ASEAPP_CODESIGN_IDENTITY}" != "-" ]]; then

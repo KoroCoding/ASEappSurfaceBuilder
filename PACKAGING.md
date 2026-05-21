@@ -45,7 +45,9 @@ ZIP 展開版を渡す場合は、`bin` / `plugins` / `translations` / `README.t
 
 - `code/native_ui/assets/aseapp_surface_builder_icon.svg`
 
-Windows 用 `.ico`、アプリ内表示用 `.png`、macOS 用 `.icns` はビルド時に自動生成されます。迷わないように、`assets` には生成済みアイコンを置かないでください。
+Windows 用 `.ico`、アプリ内表示用 `.png`、macOS 用 `.icns` はビルド時に自動生成されます。macOS では `iconutil` が使える場合、Finder で安定して表示される完全な iconset から `.icns` を作ります。DMG には同じ `.icns` をボリュームアイコンとして設定します。
+
+迷わないように、`assets` には生成済みアイコンを置かないでください。
 
 ## 環境構築
 
@@ -154,6 +156,8 @@ standalone_exe/macos/ASEappSurfaceBuilder-1.3.2-macOS.dmg
 - `README-macOS.txt`: 配布先 Mac 向けの説明
 
 配布先で完全に警告なしにするには Apple Developer ID + Notarization が必要です。Developer ID を取得しない場合、自己署名 + 配布先での明示的な信頼登録が macOS の仕様上の上限です。
+
+別の Mac で「開発元を検証できない」「壊れているため開けません」などの警告が出る場合は、DMG 内の `README-macOS.txt` を確認し、`ASEapp-macOS-Allow-This-App.command` を実行してください。大学・会社管理の Mac など端末ポリシーが強い環境では、この方法でも起動できないことがあります。その場合は管理者に許可してもらうか、Developer ID + Notarization で配布してください。
 
 ad-hoc 署名に戻したい場合だけ、次のように指定します。
 

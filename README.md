@@ -63,6 +63,17 @@
 
 DMG には `ASEappNativeUI.app`、Applications へのリンク、自己署名証明書、初回起動補助用の `ASEapp-macOS-Allow-This-App.command`、macOS 向け README を含めています。Developer ID + Notarization ではない自己署名版なので、初回起動時に Gatekeeper の警告が出る場合があります。macOS の `.dmg` 作成・署名・notarization の考え方は [`PACKAGING.md`](PACKAGING.md) に分けています。
 
+別の Mac で開く場合は、DMG 内の `README-macOS.txt` を確認してください。通常は `ASEappNativeUI.app` を Applications へドラッグし、右クリックまたは Control + クリックで「開く」を選びます。「開発元を検証できない」「壊れているため開けません」などの警告が出る場合は、DMG 内の `ASEapp-macOS-Allow-This-App.command` を実行します。このスクリプトはアプリを `~/Applications` にコピーし、同梱の自己署名証明書を信頼登録し、隔離属性を解除して起動します。
+
+DMG 自体が macOS にブロックされる場合は、配布元を信頼できることを確認してから、対象 Mac で次を実行してください。
+
+```bash
+xattr -d com.apple.quarantine /path/to/ASEappSurfaceBuilder-1.3.2-macOS.dmg
+open /path/to/ASEappSurfaceBuilder-1.3.2-macOS.dmg
+```
+
+完全に警告なしで広く配布するには、Apple Developer ID 署名と notarization が必要です。自己署名版では、大学・会社管理の Mac など端末ポリシーが強い環境では起動できないことがあります。
+
 ## ソースからビルド
 
 推奨は Conda 環境です。Qt 6 / CMake / Python 補助ツールをまとめて用意できます。
@@ -223,7 +234,7 @@ ctest --test-dir code/native_ui/build -C Debug --output-on-failure
 | Windows Application Control / Smart App Control で DLL が止まる | v1.3.0 以前の Windows launcher は第三者 DLL をローカル自己署名で再署名していたため、v1.3.1 以降を使ってください。それでも止まる場合は DLL 不足ではなく Windows 側の実行制御です。広く配布する正式版は信頼済みコード署名を推奨します。 |
 | 画面が重い | ボンド表示、ラベル、プレビューを必要な時だけ有効にし、Supercell を大きくしすぎないでください。 |
 | 原子配置位置がわかりにくい | `配置プレビューを表示` をオンにして、半透明の予定位置を確認してから `配置する` を押してください。 |
-| macOS で初回起動警告が出る | 自己署名や未notarizeのビルドでは Gatekeeper 警告が出ます。右クリックの「開く」、署名、notarization を確認してください。 |
+| macOS で初回起動警告が出る | 同梱の `README-macOS.txt` を確認し、`ASEapp-macOS-Allow-This-App.command` を実行してください。DMG 自体がブロックされる場合は `xattr -d com.apple.quarantine /path/to/ASEappSurfaceBuilder-1.3.2-macOS.dmg` を実行してから開きます。完全に警告なしで配布するには Developer ID 署名と notarization が必要です。 |
 
 ## ライセンス・引用
 

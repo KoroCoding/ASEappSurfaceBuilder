@@ -7,6 +7,8 @@ ASEapp Surface Builder for macOS
 2. 右クリックまたは Control + クリックで「開く」を選びます。
 3. macOS の確認ダイアログでもう一度「開く」を選びます。
 
+「開発元を検証できない」「壊れているため開けません」などの警告が出る場合は、下の補助スクリプトを使ってください。
+
 自己署名証明書を信頼して開く
 ----------------------------
 Developer ID 署名を使わない配布物なので、macOS Gatekeeper は初回起動時に警告を出すことがあります。
@@ -22,3 +24,4 @@ Developer ID 署名を使わない配布物なので、macOS Gatekeeper は初�
 - 他の Mac で再署名する必要は通常ありません。
 - ただし、Developer ID + Notarization ではないため、完全に警告なしの配布にはできません。
 - `ASEapp-macOS-Allow-This-App.command` は、この DMG の配布元を信頼できる場合だけ実行してください。
+- 大学・会社管理の Mac では、端末のセキュリティポリシーにより上記スクリプトでも起動できないことがあります。その場合は管理者に許可してもらうか、Developer ID + Notarization で配布してください。
