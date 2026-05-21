@@ -1,10 +1,10 @@
 # ASEapp Surface Builder v1.3.2 リリースノート
 
-対象: macOS 配布版 `ASEappSurfaceBuilder-1.3.2-macOS.dmg`
+対象: Windows 配布版 `ASEappSurfaceBuilder-1.3.2-Windows.exe` / macOS 配布版 `ASEappSurfaceBuilder-1.3.2-macOS.dmg`
 
 ## 概要
 
-v1.3.2 は、原子種ペアごとのボンド表示最大距離編集と macOS 起動時の見え方を修正した PATCH リリースです。Windows 版の同梱バイナリは今回この Mac では再生成していません。
+v1.3.2 は、原子種ペアごとのボンド表示最大距離編集と macOS 起動時の見え方を修正した PATCH リリースです。macOS DMG に続き、Windows 単体 launcher も同じバージョンとして再生成しました。
 
 ## 修正内容
 
@@ -16,6 +16,8 @@ v1.3.2 は、原子種ペアごとのボンド表示最大距離編集と macOS 
 
 ## 配布物
 
+- Windows 単体 launcher: `ASEappSurfaceBuilder-1.3.2-Windows.exe`
+- Windows ZIP 展開版: `ASEappSurfaceBuilder-1.3.2-Windows.zip`
 - macOS DMG: `ASEappSurfaceBuilder-1.3.2-macOS.dmg`
 
 ## 検証
@@ -23,4 +25,5 @@ v1.3.2 は、原子種ペアごとのボンド表示最大距離編集と macOS 
 - Release build
 - CTest
 - Ga/N/H 原子種ペア集約と表示最大距離変更の GUI self-test
+- Windows ZIP payload inspection / Authenticode 署名確認 / 起動 smoke test
 - macOS DMG 作成、codesign 検証、hdiutil verify
