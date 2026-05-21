@@ -3,7 +3,7 @@ ASEapp Surface Builder クイックスタート
 
 1. 起動
 ------
-- 単体版: ASEappSurfaceBuilder-1.3.1-Windows.exe を実行します。
+- 単体版: ASEappSurfaceBuilder-1.3.2-Windows.exe を実行します。
 - 展開版: bin\ASEappNativeUI.exe を実行します。
 - macOS DMG 版: ASEappNativeUI.app を Applications へドラッグし、右クリックまたは Control + クリックで「開く」を選びます。
 

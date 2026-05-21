@@ -15,6 +15,7 @@ standalone_exe/                          # 確認済み配布物の配置先
 
 現在リポジトリに同梱している確認済み配布物は次の通りです。
 
+- Windows: `standalone_exe/windows/ASEappSurfaceBuilder-1.3.2-Windows.exe`
 - Windows: `standalone_exe/windows/ASEappSurfaceBuilder-1.3.1-Windows.exe`
 - Windows: `standalone_exe/windows/ASEappSurfaceBuilder-1.2.0-Windows.exe`
 - Windows: `standalone_exe/windows/ASEappSurfaceBuilder-1.1.2-Windows.exe`
@@ -79,7 +80,7 @@ powershell -ExecutionPolicy Bypass -File code/native_ui/package_windows_launcher
 standalone_exe/windows/ASEappSurfaceBuilder-1.3.2-Windows.exe
 ```
 
-現在このリポジトリに同梱している Windows 版は `standalone_exe/windows/ASEappSurfaceBuilder-1.3.1-Windows.exe` です。互換確認用として `standalone_exe/windows/ASEappSurfaceBuilder-1.2.0-Windows.exe`、`standalone_exe/windows/ASEappSurfaceBuilder-1.1.2-Windows.exe`、`standalone_exe/windows/ASEappSurfaceBuilder-1.1.1-Windows.exe`、`standalone_exe/windows/ASEappSurfaceBuilder-1.1.0-Windows.exe`、`standalone_exe/windows/ASEappSurfaceBuilder-1.0.0-Windows.exe` も残しています。
+現在このリポジトリに同梱している Windows 版は `standalone_exe/windows/ASEappSurfaceBuilder-1.3.2-Windows.exe` です。互換確認用として `standalone_exe/windows/ASEappSurfaceBuilder-1.3.1-Windows.exe`、`standalone_exe/windows/ASEappSurfaceBuilder-1.2.0-Windows.exe`、`standalone_exe/windows/ASEappSurfaceBuilder-1.1.2-Windows.exe`、`standalone_exe/windows/ASEappSurfaceBuilder-1.1.1-Windows.exe`、`standalone_exe/windows/ASEappSurfaceBuilder-1.1.0-Windows.exe`、`standalone_exe/windows/ASEappSurfaceBuilder-1.0.0-Windows.exe` も残しています。
 
 ### ローカル署名（開発確認用）
 
