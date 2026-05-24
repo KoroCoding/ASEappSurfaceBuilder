@@ -33,6 +33,7 @@
 #include <QInputDialog>
 #include <QKeySequence>
 #include <QLabel>
+#include <QLayout>
 #include <QLineEdit>
 #include <QListWidget>
 #include <QJsonArray>
@@ -41,6 +42,7 @@
 #include <QMessageBox>
 #include <QMouseEvent>
 #include <QMimeData>
+#include <QMenu>
 #include <QMenuBar>
 #include <QPainter>
 #include <QPainterPath>
@@ -54,17 +56,19 @@
 #include <QScrollArea>
 #include <QScreen>
 #include <QShortcut>
+#include <QSaveFile>
 #include <QRadioButton>
 #include <QAbstractSpinBox>
 #include <QDoubleSpinBox>
 #include <QSpinBox>
 #include <QSplitter>
 #include <QStatusBar>
+#include <QStandardPaths>
+#include <QTabWidget>
 #include <QTextStream>
 #include <QToolBar>
 #include <QIcon>
 #include <QUrl>
-#include <QSettings>
 #include <QShowEvent>
 #include <QSizePolicy>
 #include <QSignalBlocker>
@@ -129,7 +133,10 @@ QString supercellTransformLabel(const SupercellTransformMatrix& matrix, bool jap
 bool editPreservesSupercellBase(const QString& label) {
     return label == QStringLiteral("vacuum")
         || label == QStringLiteral("remove_vacuum")
-        || label == QStringLiteral("axis_tilt");
+        || label == QStringLiteral("axis_tilt")
+        || label == QStringLiteral("placement")
+        || label == QStringLiteral("precursor")
+        || label == QStringLiteral("termination");
 }
 
 QVector3D safeNormalized(const QVector3D& vector, const QVector3D& fallback) {
@@ -1015,6 +1022,237 @@ bool isSelectedBondAxisKey(const QString& axisKey) {
 QVector3D cellAxisDirection(const StructureData& structure, int axisIndex) {
     const int idx = std::clamp(axisIndex, 0, 2);
     return normalizedOrFallback(structure.cellVectors[static_cast<std::size_t>(idx)]);
+}
+
+bool fractionalInsideUnitCellForPlacement(const QVector3D& fractional) {
+    constexpr double kCellBoundaryTolerance = 1.0e-6;
+    return fractional.x() >= -kCellBoundaryTolerance && fractional.x() <= 1.0 + kCellBoundaryTolerance
+        && fractional.y() >= -kCellBoundaryTolerance && fractional.y() <= 1.0 + kCellBoundaryTolerance
+        && fractional.z() >= -kCellBoundaryTolerance && fractional.z() <= 1.0 + kCellBoundaryTolerance;
+}
+
+bool newAtomsOutsideUnitCell(const StructureData& structure, int firstAtomIndex) {
+    const int begin = std::max(0, firstAtomIndex);
+    for (int index = begin; index < static_cast<int>(structure.atoms.size()); ++index) {
+        if (!fractionalInsideUnitCellForPlacement(structure.atoms[static_cast<std::size_t>(index)].fractional)) {
+            return true;
+        }
+    }
+    return false;
+}
+
+bool projectedAtomRangeOnAxis(const StructureData& structure, int axisIndex, float* minProjection, float* maxProjection) {
+    if (structure.atoms.empty() || minProjection == nullptr || maxProjection == nullptr) {
+        return false;
+    }
+    const int idx = std::clamp(axisIndex, 0, 2);
+    const QVector3D axisVector = structure.cellVectors[static_cast<std::size_t>(idx)];
+    if (axisVector.lengthSquared() <= 1.0e-10f) {
+        return false;
+    }
+    const QVector3D axis = axisVector.normalized();
+    float minValue = std::numeric_limits<float>::max();
+    float maxValue = std::numeric_limits<float>::lowest();
+    for (const auto& atom : structure.atoms) {
+        const float projection = QVector3D::dotProduct(atom.cartesian, axis);
+        minValue = std::min(minValue, projection);
+        maxValue = std::max(maxValue, projection);
+    }
+    *minProjection = minValue;
+    *maxProjection = maxValue;
+    return true;
+}
+
+StructureData expandCellToContainAllAtoms(const StructureData& source) {
+    constexpr double kPlacementVacuumPaddingAngstrom = 1.0;
+    constexpr float kProjectionTolerance = 1.0e-4f;
+    StructureData expanded = source;
+    for (int axis = 0; axis < 3; ++axis) {
+        float minProjection = 0.0f;
+        float maxProjection = 0.0f;
+        if (!projectedAtomRangeOnAxis(expanded, axis, &minProjection, &maxProjection)) {
+            continue;
+        }
+        if (minProjection < -kProjectionTolerance) {
+            VacuumAdjustmentOptions options;
+            options.axisIndex = axis;
+            options.fitTight = false;
+            options.vacuumAngstrom = static_cast<double>(-minProjection) + kPlacementVacuumPaddingAngstrom;
+            options.placementMode = 2;
+            expanded = adjustVacuumAndSlab(expanded, options);
+        }
+
+        if (!projectedAtomRangeOnAxis(expanded, axis, &minProjection, &maxProjection)) {
+            continue;
+        }
+        const float axisLength = expanded.cellVectors[static_cast<std::size_t>(axis)].length();
+        if (maxProjection > axisLength + kProjectionTolerance) {
+            VacuumAdjustmentOptions options;
+            options.axisIndex = axis;
+            options.fitTight = false;
+            options.vacuumAngstrom = static_cast<double>(maxProjection - axisLength) + kPlacementVacuumPaddingAngstrom;
+            options.placementMode = 0;
+            expanded = adjustVacuumAndSlab(expanded, options);
+        }
+    }
+    return expanded;
+}
+
+bool confirmPlacementVacuumExpansion(QWidget* parent, bool japanese, const QString& title) {
+    const QString message = japanese
+        ? QStringLiteral("配置プレビューが現在のセル（真空層）の外に出ています。\nセル軸を自動で伸ばして真空層を追加してから配置しますか？")
+        : QStringLiteral("The placement preview is outside the current cell/vacuum region.\nExpand the cell by adding vacuum before placing it?");
+    return QMessageBox::question(parent, title, message, QMessageBox::Yes | QMessageBox::No, QMessageBox::No) == QMessageBox::Yes;
+}
+
+QJsonObject readJsonObject(const QString& path) {
+    QFile file(path);
+    if (!file.open(QIODevice::ReadOnly)) {
+        return {};
+    }
+    QJsonParseError error;
+    const QJsonDocument document = QJsonDocument::fromJson(file.readAll(), &error);
+    if (error.error != QJsonParseError::NoError || !document.isObject()) {
+        return {};
+    }
+    return document.object();
+}
+
+QJsonObject mergeJsonObjects(QJsonObject base, const QJsonObject& overlay) {
+    for (auto it = overlay.begin(); it != overlay.end(); ++it) {
+        if (it.value().isObject() && base.value(it.key()).isObject()) {
+            base.insert(it.key(), mergeJsonObjects(base.value(it.key()).toObject(), it.value().toObject()));
+        } else {
+            base.insert(it.key(), it.value());
+        }
+    }
+    return base;
+}
+
+QString appSettingsFilePath() {
+    QString configDir = QStandardPaths::writableLocation(QStandardPaths::AppConfigLocation);
+    if (configDir.trimmed().isEmpty()) {
+        configDir = QDir::home().filePath(QStringLiteral(".aseapp"));
+    }
+    QDir().mkpath(configDir);
+    return QDir(configDir).filePath(QStringLiteral("app_settings.json"));
+}
+
+QJsonObject defaultAppSettings() {
+    QJsonObject defaults = readJsonObject(QStringLiteral(":/settings/default_app_settings.json"));
+    if (defaults.isEmpty()) {
+        defaults.insert(QStringLiteral("schemaVersion"), 1);
+    }
+    return defaults;
+}
+
+QJsonObject loadAppSettings() {
+    return mergeJsonObjects(defaultAppSettings(), readJsonObject(appSettingsFilePath()));
+}
+
+bool saveAppSettings(const QJsonObject& settings) {
+    const QString path = appSettingsFilePath();
+    QDir().mkpath(QFileInfo(path).absolutePath());
+    QSaveFile file(path);
+    if (!file.open(QIODevice::WriteOnly | QIODevice::Truncate)) {
+        return false;
+    }
+    file.write(QJsonDocument(settings).toJson(QJsonDocument::Indented));
+    return file.commit();
+}
+
+QJsonValue appSettingValue(const QStringList& path, const QJsonValue& fallback = QJsonValue()) {
+    QJsonValue value(loadAppSettings());
+    for (const QString& key : path) {
+        if (!value.isObject()) {
+            return fallback;
+        }
+        const QJsonObject object = value.toObject();
+        if (!object.contains(key)) {
+            return fallback;
+        }
+        value = object.value(key);
+    }
+    return value.isUndefined() ? fallback : value;
+}
+
+void setAppSettingValue(const QStringList& path, const QJsonValue& value) {
+    if (path.isEmpty()) {
+        return;
+    }
+    QJsonObject root = loadAppSettings();
+    // Rebuild from the leaf upward so nested objects are updated safely without
+    // keeping pointers to temporary QJsonObject values.
+    QVector<QJsonObject> chain;
+    chain.push_back(root);
+    for (int i = 0; i + 1 < path.size(); ++i) {
+        chain.push_back(chain.last().value(path.at(i)).toObject());
+    }
+    QJsonObject updated = chain.last();
+    updated.insert(path.last(), value);
+    for (int i = path.size() - 2; i >= 0; --i) {
+        QJsonObject parent = chain.at(i);
+        parent.insert(path.at(i), updated);
+        updated = parent;
+    }
+    saveAppSettings(updated);
+}
+
+bool appBoolSetting(const QStringList& path, bool fallback) {
+    return appSettingValue(path, fallback).toBool(fallback);
+}
+
+double appDoubleSetting(const QStringList& path, double fallback) {
+    return appSettingValue(path, fallback).toDouble(fallback);
+}
+
+bool displayStartupSetting(const QString& key, bool fallback) {
+    return appBoolSetting({QStringLiteral("display"), QStringLiteral("startup"), key}, fallback);
+}
+
+void setDisplayStartupSetting(const QString& key, bool value) {
+    setAppSettingValue({QStringLiteral("display"), QStringLiteral("startup"), key}, value);
+}
+
+double displayStartupDoubleSetting(const QString& key, double fallback) {
+    return appDoubleSetting({QStringLiteral("display"), QStringLiteral("startup"), key}, fallback);
+}
+
+void setDisplayStartupDoubleSetting(const QString& key, double value) {
+    setAppSettingValue({QStringLiteral("display"), QStringLiteral("startup"), key}, value);
+}
+
+void setLayoutContentsVisible(QLayout* layout, bool visible) {
+    if (layout == nullptr) {
+        return;
+    }
+    for (int i = 0; i < layout->count(); ++i) {
+        QLayoutItem* item = layout->itemAt(i);
+        if (item == nullptr) {
+            continue;
+        }
+        if (QWidget* widget = item->widget()) {
+            widget->setVisible(visible);
+        }
+        if (QLayout* childLayout = item->layout()) {
+            setLayoutContentsVisible(childLayout, visible);
+        }
+    }
+}
+
+void makeCollapsibleGroup(QGroupBox* group, const QString& key, bool defaultExpanded = true) {
+    if (group == nullptr) {
+        return;
+    }
+    const bool expanded = appBoolSetting({QStringLiteral("ui"), QStringLiteral("groups"), key}, defaultExpanded);
+    group->setProperty("aseappGroupSettingsKey", key);
+    group->setCheckable(true);
+    group->setChecked(expanded);
+    setLayoutContentsVisible(group->layout(), expanded);
+    QObject::connect(group, &QGroupBox::toggled, group, [group, key](bool checked) {
+        setLayoutContentsVisible(group->layout(), checked);
+        setAppSettingValue({QStringLiteral("ui"), QStringLiteral("groups"), key}, checked);
+    });
 }
 
 QVector3D slabNormalDirection(const StructureData& structure) {
@@ -2819,8 +3057,7 @@ public:
 }  // namespace
 
 MainWindow::MainWindow(QWidget* parent) : QMainWindow(parent) {
-    QSettings settings(QStringLiteral("ASEapp"), QStringLiteral("ASEappSurfaceBuilder"));
-    m_japanese = settings.value(QStringLiteral("ui/japanese"), true).toBool();
+    m_japanese = appBoolSetting({QStringLiteral("ui"), QStringLiteral("japanese")}, true);
     setAcceptDrops(true);
     setWindowIcon(QIcon(":/icons/aseapp_surface_builder_icon.png"));
     m_loader = new StructureFileLoader(this);
@@ -3097,7 +3334,8 @@ void MainWindow::buildUi() {
     fileLayout->addWidget(m_fileLabel);
     fileLayout->addWidget(openButton);
     fileLayout->addWidget(saveButton);
-    fileGroup->setVisible(false);
+    rightLayout->addWidget(fileGroup);
+    makeCollapsibleGroup(fileGroup, QStringLiteral("file"), false);
 
     auto* presetGroup = new QGroupBox(uiText(QStringLiteral("placement_group")), rightPanel);
     auto* presetLayout = new QVBoxLayout(presetGroup);
@@ -3242,6 +3480,7 @@ void MainWindow::buildUi() {
     outputRow->addWidget(exportLegendButton);
     presetLayout->addLayout(outputRow);
     rightLayout->addWidget(presetGroup);
+    makeCollapsibleGroup(presetGroup, QStringLiteral("placement"), true);
 
     auto* poseGroup = new QGroupBox(uiText(QStringLiteral("pose_group")), rightPanel);
     poseGroup->setToolTip(uiText(QStringLiteral("pose_tip")));
@@ -3365,6 +3604,7 @@ void MainWindow::buildUi() {
     poseExportRow->addWidget(m_exportPoseSnippetButton);
     poseLayout->addLayout(poseExportRow);
     rightLayout->addWidget(poseGroup);
+    makeCollapsibleGroup(poseGroup, QStringLiteral("pose"), true);
 
     auto* surfaceGroup = new QGroupBox(uiText(QStringLiteral("supercell_group")), rightPanel);
     auto* surfaceLayout = new QVBoxLayout(surfaceGroup);
@@ -3391,6 +3631,7 @@ void MainWindow::buildUi() {
     surfaceLayout->addWidget(removeVacuumButton);
     surfaceLayout->addWidget(axisTiltButton);
     rightLayout->addWidget(surfaceGroup);
+    makeCollapsibleGroup(surfaceGroup, QStringLiteral("surface"), true);
 
     auto* viewGroup = new QGroupBox(uiText(QStringLiteral("view_group")), rightPanel);
     auto* viewLayout = new QVBoxLayout(viewGroup);
@@ -3494,24 +3735,25 @@ void MainWindow::buildUi() {
     viewRow->addWidget(resetButton);
     viewLayout->addLayout(viewRow);
     rightLayout->addWidget(viewGroup);
+    makeCollapsibleGroup(viewGroup, QStringLiteral("view"), true);
 
     auto* displayGroup = new QGroupBox(m_japanese ? QStringLiteral("表示") : QStringLiteral("Display"), rightPanel);
     auto* displayLayout = new QVBoxLayout(displayGroup);
     m_showCellCheck = new QCheckBox(uiText(QStringLiteral("cell")));
-    m_showCellCheck->setChecked(true);
+    m_showCellCheck->setChecked(displayStartupSetting(QStringLiteral("showCell"), true));
     m_showBondsCheck = new QCheckBox(uiText(QStringLiteral("bonds")));
-    m_showBondsCheck->setChecked(true);
+    m_showBondsCheck->setChecked(displayStartupSetting(QStringLiteral("showBonds"), true));
     m_showOutsideCellCheck = new QCheckBox(uiText(QStringLiteral("outside_cell")));
-    m_showOutsideCellCheck->setChecked(true);
+    m_showOutsideCellCheck->setChecked(displayStartupSetting(QStringLiteral("showOutsideCell"), true));
     m_showOutsideCellCheck->setToolTip(uiText(QStringLiteral("outside_cell_tip")));
     m_showAxesCheck = new QCheckBox(uiText(QStringLiteral("axes")));
-    m_showAxesCheck->setChecked(true);
+    m_showAxesCheck->setChecked(displayStartupSetting(QStringLiteral("showAxes"), true));
     m_showLabelsCheck = new QCheckBox(uiText(QStringLiteral("labels")));
-    m_showLabelsCheck->setChecked(false);
+    m_showLabelsCheck->setChecked(displayStartupSetting(QStringLiteral("showLabels"), false));
     m_perspectiveCheck = new QCheckBox(uiText(QStringLiteral("perspective")));
-    m_perspectiveCheck->setChecked(false);
+    m_perspectiveCheck->setChecked(displayStartupSetting(QStringLiteral("perspective"), false));
     m_depthCueCheck = new QCheckBox(uiText(QStringLiteral("depth_cue")));
-    m_depthCueCheck->setChecked(false);
+    m_depthCueCheck->setChecked(displayStartupSetting(QStringLiteral("depthCue"), false));
     for (auto* check : {m_showCellCheck, m_showBondsCheck, m_showOutsideCellCheck, m_showAxesCheck, m_showLabelsCheck, m_perspectiveCheck, m_depthCueCheck}) {
         displayLayout->addWidget(check);
         connect(check, &QCheckBox::toggled, this, &MainWindow::syncCanvasDisplayOptions);
@@ -3522,7 +3764,7 @@ void MainWindow::buildUi() {
     displayLayout->addWidget(elementPairBondButton);
     m_atomScaleSpin = new QDoubleSpinBox();
     m_atomScaleSpin->setRange(60.0, 180.0);
-    m_atomScaleSpin->setValue(100.0);
+    m_atomScaleSpin->setValue(displayStartupDoubleSetting(QStringLiteral("atomScalePercent"), 100.0));
     m_atomScaleSpin->setSuffix("%");
     m_atomScaleSpin->setSingleStep(5.0);
     m_atomScaleSpin->setToolTip("Scale the atom spheres on screen.");
@@ -3530,14 +3772,23 @@ void MainWindow::buildUi() {
     auto* atomScaleForm = new QFormLayout();
     atomScaleForm->addRow("Atom size", m_atomScaleSpin);
     displayLayout->addLayout(atomScaleForm);
-    displayGroup->setVisible(false);
+    auto* startupHint = new QLabel(
+        m_japanese
+            ? QStringLiteral("ここで変更した表示状態は次回起動時の初期状態として保存されます。")
+            : QStringLiteral("Display states changed here are saved as the next startup defaults."),
+        displayGroup);
+    startupHint->setWordWrap(true);
+    displayLayout->addWidget(startupHint);
+    rightLayout->addWidget(displayGroup);
+    makeCollapsibleGroup(displayGroup, QStringLiteral("display"), true);
 
     auto* infoGroup = new QGroupBox(m_japanese ? QStringLiteral("現在の構造") : QStringLiteral("Current structure"), rightPanel);
     auto* infoLayout = new QVBoxLayout(infoGroup);
     m_summaryLabel = new QLabel("-", infoGroup);
     m_summaryLabel->setWordWrap(true);
     infoLayout->addWidget(m_summaryLabel);
-    infoGroup->setVisible(false);
+    rightLayout->addWidget(infoGroup);
+    makeCollapsibleGroup(infoGroup, QStringLiteral("info"), false);
     rightLayout->addStretch(1);
 
     splitter->addWidget(rightScroll);
@@ -3613,7 +3864,6 @@ void MainWindow::buildUi() {
     m_terminateAction->setShortcut(QKeySequence("Ctrl+Alt+H"));
     m_terminateAction->setToolTip("Add hydrogen termination to the surface.");
     connect(m_terminateAction, &QAction::triggered, this, &MainWindow::terminateHydrogen);
-    m_terminateAction->setVisible(false);
     m_vacuumAction = new QAction(uiText(QStringLiteral("vacuum")), this);
     m_vacuumAction->setShortcut(QKeySequence("Ctrl+Alt+V"));
     m_vacuumAction->setToolTip(uiText(QStringLiteral("vacuum_tip")));
@@ -3629,39 +3879,113 @@ void MainWindow::buildUi() {
     m_axisTiltAction->setToolTip(uiText(QStringLiteral("axis_tilt_tip")));
     connect(m_axisTiltAction, &QAction::triggered, this, &MainWindow::tiltCellAxis);
     toolbar->addAction(m_axisTiltAction);
-    m_showCellAction = toolbar->addAction(uiText(QStringLiteral("cell"))); m_showCellAction->setCheckable(true); m_showCellAction->setChecked(true);
+    m_showCellAction = toolbar->addAction(uiText(QStringLiteral("cell"))); m_showCellAction->setCheckable(true); m_showCellAction->setChecked(m_showCellCheck != nullptr ? m_showCellCheck->isChecked() : true);
     m_showCellAction->setToolTip("Show or hide the unit-cell frame.");
     connect(m_showCellAction, &QAction::toggled, m_showCellCheck, &QCheckBox::setChecked);
     connect(m_showCellCheck, &QCheckBox::toggled, m_showCellAction, &QAction::setChecked);
-    m_showBondsAction = toolbar->addAction(uiText(QStringLiteral("bonds"))); m_showBondsAction->setCheckable(true); m_showBondsAction->setChecked(true);
+    m_showBondsAction = toolbar->addAction(uiText(QStringLiteral("bonds"))); m_showBondsAction->setCheckable(true); m_showBondsAction->setChecked(m_showBondsCheck != nullptr ? m_showBondsCheck->isChecked() : true);
     m_showBondsAction->setToolTip("Show or hide bond connections.");
     connect(m_showBondsAction, &QAction::toggled, m_showBondsCheck, &QCheckBox::setChecked);
     connect(m_showBondsCheck, &QCheckBox::toggled, m_showBondsAction, &QAction::setChecked);
-    m_showOutsideCellAction = toolbar->addAction(uiText(QStringLiteral("outside_cell"))); m_showOutsideCellAction->setCheckable(true); m_showOutsideCellAction->setChecked(true);
+    m_showOutsideCellAction = toolbar->addAction(uiText(QStringLiteral("outside_cell"))); m_showOutsideCellAction->setCheckable(true); m_showOutsideCellAction->setChecked(m_showOutsideCellCheck != nullptr ? m_showOutsideCellCheck->isChecked() : true);
     m_showOutsideCellAction->setToolTip(uiText(QStringLiteral("outside_cell_tip")));
     connect(m_showOutsideCellAction, &QAction::toggled, m_showOutsideCellCheck, &QCheckBox::setChecked);
     connect(m_showOutsideCellCheck, &QCheckBox::toggled, m_showOutsideCellAction, &QAction::setChecked);
     m_bondDistanceAction = toolbar->addAction(uiText(QStringLiteral("element_pair_bond_lengths")));
     m_bondDistanceAction->setToolTip(uiText(QStringLiteral("element_pair_bond_lengths_tip")));
     connect(m_bondDistanceAction, &QAction::triggered, this, &MainWindow::editElementPairBondLengths);
-    m_showAxesAction = toolbar->addAction(uiText(QStringLiteral("axes"))); m_showAxesAction->setCheckable(true); m_showAxesAction->setChecked(true);
+    m_showAxesAction = toolbar->addAction(uiText(QStringLiteral("axes"))); m_showAxesAction->setCheckable(true); m_showAxesAction->setChecked(m_showAxesCheck != nullptr ? m_showAxesCheck->isChecked() : true);
     m_showAxesAction->setToolTip("Show or hide the XYZ axes.");
     connect(m_showAxesAction, &QAction::toggled, m_showAxesCheck, &QCheckBox::setChecked);
     connect(m_showAxesCheck, &QCheckBox::toggled, m_showAxesAction, &QAction::setChecked);
-    m_showLabelsAction = toolbar->addAction(uiText(QStringLiteral("labels"))); m_showLabelsAction->setCheckable(true); m_showLabelsAction->setChecked(false);
+    m_showLabelsAction = toolbar->addAction(uiText(QStringLiteral("labels"))); m_showLabelsAction->setCheckable(true); m_showLabelsAction->setChecked(m_showLabelsCheck != nullptr ? m_showLabelsCheck->isChecked() : false);
     m_showLabelsAction->setToolTip("Show or hide atom labels.");
     connect(m_showLabelsAction, &QAction::toggled, m_showLabelsCheck, &QCheckBox::setChecked);
     connect(m_showLabelsCheck, &QCheckBox::toggled, m_showLabelsAction, &QAction::setChecked);
-    m_perspectiveAction = toolbar->addAction(uiText(QStringLiteral("perspective"))); m_perspectiveAction->setCheckable(true); m_perspectiveAction->setChecked(false);
+    m_perspectiveAction = toolbar->addAction(uiText(QStringLiteral("perspective"))); m_perspectiveAction->setCheckable(true); m_perspectiveAction->setChecked(m_perspectiveCheck != nullptr ? m_perspectiveCheck->isChecked() : false);
     m_perspectiveAction->setToolTip("Toggle perspective projection.");
     connect(m_perspectiveAction, &QAction::toggled, m_perspectiveCheck, &QCheckBox::setChecked);
     connect(m_perspectiveCheck, &QCheckBox::toggled, m_perspectiveAction, &QAction::setChecked);
-    m_depthCueAction = toolbar->addAction(uiText(QStringLiteral("depth_cue"))); m_depthCueAction->setCheckable(true); m_depthCueAction->setChecked(false);
+    m_depthCueAction = toolbar->addAction(uiText(QStringLiteral("depth_cue"))); m_depthCueAction->setCheckable(true); m_depthCueAction->setChecked(m_depthCueCheck != nullptr ? m_depthCueCheck->isChecked() : false);
     m_depthCueAction->setToolTip("Toggle depth-based transparency.");
     connect(m_depthCueAction, &QAction::toggled, m_depthCueCheck, &QCheckBox::setChecked);
     connect(m_depthCueCheck, &QCheckBox::toggled, m_depthCueAction, &QAction::setChecked);
 
-    auto* languageMenu = menuBar()->addMenu(QStringLiteral("Language"));
+    m_settingsAction = new QAction(m_japanese ? QStringLiteral("アプリ設定...") : QStringLiteral("App settings..."), this);
+    m_settingsAction->setShortcut(QKeySequence("Ctrl+,"));
+    connect(m_settingsAction, &QAction::triggered, this, &MainWindow::showAppSettingsDialog);
+
+    auto* fileMenu = menuBar()->addMenu(m_japanese ? QStringLiteral("ファイル") : QStringLiteral("File"));
+    fileMenu->addAction(m_openAction);
+    fileMenu->addAction(m_newTabAction);
+    fileMenu->addAction(m_closeTabAction);
+    fileMenu->addSeparator();
+    fileMenu->addAction(m_saveAction);
+    fileMenu->addSeparator();
+    fileMenu->addAction(m_exportLegendAction);
+
+    auto* editMenu = menuBar()->addMenu(m_japanese ? QStringLiteral("編集") : QStringLiteral("Edit"));
+    editMenu->addAction(m_undoAction);
+    editMenu->addAction(m_redoAction);
+    editMenu->addSeparator();
+    auto* clearSelectionAction = editMenu->addAction(uiText(QStringLiteral("clear")));
+    clearSelectionAction->setShortcut(QKeySequence(Qt::Key_Escape));
+    connect(clearSelectionAction, &QAction::triggered, this, &MainWindow::clearSelection);
+    auto* deleteSelectionAction = editMenu->addAction(uiText(QStringLiteral("delete_selected")));
+    deleteSelectionAction->setShortcut(QKeySequence::Delete);
+    connect(deleteSelectionAction, &QAction::triggered, this, &MainWindow::deleteSelectedAtoms);
+
+    auto* structureMenu = menuBar()->addMenu(m_japanese ? QStringLiteral("構造") : QStringLiteral("Structure"));
+    structureMenu->addAction(m_supercellAction);
+    structureMenu->addAction(m_vacuumAction);
+    structureMenu->addAction(m_removeVacuumAction);
+    structureMenu->addAction(m_axisTiltAction);
+    structureMenu->addAction(m_terminateAction);
+    structureMenu->addSeparator();
+    auto* structureCheckAction = structureMenu->addAction(m_japanese ? QStringLiteral("構造チェック") : QStringLiteral("Structure check"));
+    connect(structureCheckAction, &QAction::triggered, this, &MainWindow::showStructureCheckReport);
+    auto* measurementAction = structureMenu->addAction(m_japanese ? QStringLiteral("測定レポート") : QStringLiteral("Measurement report"));
+    connect(measurementAction, &QAction::triggered, this, &MainWindow::showMeasurementReport);
+
+    auto* placementMenu = menuBar()->addMenu(m_japanese ? QStringLiteral("配置") : QStringLiteral("Placement"));
+    auto* chooseElementAction = placementMenu->addAction(uiText(QStringLiteral("periodic_table")));
+    connect(chooseElementAction, &QAction::triggered, this, &MainWindow::choosePlacementElement);
+    auto* applyPlacementAction = placementMenu->addAction(uiText(QStringLiteral("apply")));
+    connect(applyPlacementAction, &QAction::triggered, this, &MainWindow::applySelectedPreset);
+    placementMenu->addSeparator();
+    auto* reloadPresetAction = placementMenu->addAction(uiText(QStringLiteral("reload")));
+    connect(reloadPresetAction, &QAction::triggered, this, &MainWindow::reloadPresetRegistry);
+    auto* openPresetAction = placementMenu->addAction(uiText(QStringLiteral("open_json")));
+    connect(openPresetAction, &QAction::triggered, this, &MainWindow::openPresetFile);
+    placementMenu->addSeparator();
+    auto* savePrecursorAction = placementMenu->addAction(uiText(QStringLiteral("save_precursor")));
+    connect(savePrecursorAction, &QAction::triggered, this, &MainWindow::saveSelectedPrecursorCsv);
+    auto* loadPrecursorAction = placementMenu->addAction(uiText(QStringLiteral("load_precursor")));
+    connect(loadPrecursorAction, &QAction::triggered, this, &MainWindow::loadPrecursorCsv);
+    auto* placePrecursorAction = placementMenu->addAction(uiText(QStringLiteral("place_precursor")));
+    connect(placePrecursorAction, &QAction::triggered, this, &MainWindow::placeLoadedPrecursor);
+
+    auto* poseMenu = menuBar()->addMenu(m_japanese ? QStringLiteral("ポーズ") : QStringLiteral("Pose"));
+    auto* createPoseGroupAction = poseMenu->addAction(uiText(QStringLiteral("create_pose_group")));
+    connect(createPoseGroupAction, &QAction::triggered, this, &MainWindow::createPoseGroupFromSelection);
+    poseMenu->addSeparator();
+    auto* applyPoseTranslationAction = poseMenu->addAction(uiText(QStringLiteral("apply_pose_translate")));
+    connect(applyPoseTranslationAction, &QAction::triggered, this, &MainWindow::applyPoseTranslation);
+    auto* applyPoseRotationAction = poseMenu->addAction(uiText(QStringLiteral("apply_pose_rotate")));
+    connect(applyPoseRotationAction, &QAction::triggered, this, &MainWindow::applyPoseRotation);
+    auto* applyPoseBondAction = poseMenu->addAction(uiText(QStringLiteral("apply_pose_bond")));
+    connect(applyPoseBondAction, &QAction::triggered, this, &MainWindow::applyPoseBondLength);
+    auto* resetPoseAction = poseMenu->addAction(uiText(QStringLiteral("reset_pose")));
+    connect(resetPoseAction, &QAction::triggered, this, &MainWindow::resetPoseGroup);
+    poseMenu->addSeparator();
+    auto* exportPoseXyzAction = poseMenu->addAction(uiText(QStringLiteral("export_pose_xyz")));
+    connect(exportPoseXyzAction, &QAction::triggered, this, &MainWindow::exportPoseXyz);
+    auto* exportPoseJsonAction = poseMenu->addAction(uiText(QStringLiteral("export_pose_json")));
+    connect(exportPoseJsonAction, &QAction::triggered, this, &MainWindow::exportPoseJson);
+    auto* exportPoseSnippetAction = poseMenu->addAction(uiText(QStringLiteral("export_pose_snippet")));
+    connect(exportPoseSnippetAction, &QAction::triggered, this, &MainWindow::exportPoseSnippet);
+
+    auto* languageMenu = new QMenu(QStringLiteral("Language"), this);
     auto* japaneseAction = languageMenu->addAction(QStringLiteral("日本語"));
     connect(japaneseAction, &QAction::triggered, this, [this]() {
         if (!m_japanese) {
@@ -3676,6 +4000,37 @@ void MainWindow::buildUi() {
     });
 
     auto* viewMenu = menuBar()->addMenu(uiText(QStringLiteral("view")));
+    viewMenu->addAction(m_fitAction);
+    viewMenu->addAction(m_resetAction);
+    viewMenu->addSeparator();
+    auto* directViewMenu = viewMenu->addMenu(m_japanese ? QStringLiteral("direct視点") : QStringLiteral("Direct views"));
+    for (int axis = 0; axis < 3; ++axis) {
+        const QString label = QStringLiteral("direct %1").arg(QString(QChar(QLatin1Char(static_cast<char>('a' + axis)))));
+        auto* action = directViewMenu->addAction(label);
+        connect(action, &QAction::triggered, this, [this, axis]() {
+            const auto [direction, up] = canonicalDirectViewDirection(m_structure.cellVectors, axis);
+            m_canvas->setViewDirection(direction, up, true);
+            m_canvas->fitToStructure();
+        });
+    }
+    auto* reciprocalViewMenu = viewMenu->addMenu(m_japanese ? QStringLiteral("reciprocal視点") : QStringLiteral("Reciprocal views"));
+    for (int axis = 0; axis < 3; ++axis) {
+        const QString label = QStringLiteral("%1*").arg(QString(QChar(QLatin1Char(static_cast<char>('a' + axis)))));
+        auto* action = reciprocalViewMenu->addAction(label);
+        connect(action, &QAction::triggered, this, [this, axis]() {
+            const auto [direction, up] = canonicalReciprocalViewDirection(m_structure.cellVectors, axis);
+            m_canvas->setViewDirection(direction, up, true);
+            m_canvas->fitToStructure();
+        });
+    }
+    auto* interactionModeMenu = viewMenu->addMenu(uiText(QStringLiteral("interaction_mode")));
+    auto* viewModeAction = interactionModeMenu->addAction(uiText(QStringLiteral("view_mode")));
+    connect(viewModeAction, &QAction::triggered, viewModeButton, [viewModeButton]() { viewModeButton->setChecked(true); });
+    auto* moveAtomsAction = interactionModeMenu->addAction(uiText(QStringLiteral("move_mode")));
+    connect(moveAtomsAction, &QAction::triggered, moveModeButton, [moveModeButton]() { moveModeButton->setChecked(true); });
+    auto* moveModelAction = interactionModeMenu->addAction(uiText(QStringLiteral("model_mode")));
+    connect(moveModelAction, &QAction::triggered, modelModeButton, [modelModeButton]() { modelModeButton->setChecked(true); });
+    viewMenu->addSeparator();
     viewMenu->addAction(m_showCellAction);
     viewMenu->addAction(m_showBondsAction);
     viewMenu->addAction(m_showOutsideCellAction);
@@ -3684,15 +4039,32 @@ void MainWindow::buildUi() {
     viewMenu->addSeparator();
     viewMenu->addAction(m_perspectiveAction);
     viewMenu->addAction(m_depthCueAction);
+    viewMenu->addSeparator();
+    viewMenu->addAction(m_bondDistanceAction);
+
+    auto* toolsMenu = menuBar()->addMenu(m_japanese ? QStringLiteral("ツール") : QStringLiteral("Tools"));
+    auto* atomPairBondAction = toolsMenu->addAction(uiText(QStringLiteral("bond_distances")));
+    connect(atomPairBondAction, &QAction::triggered, this, &MainWindow::editBondDistances);
+    toolsMenu->addAction(m_bondDistanceAction);
+    toolsMenu->addAction(m_exportLegendAction);
+    toolsMenu->addSeparator();
+    toolsMenu->addAction(measurementAction);
+    toolsMenu->addAction(structureCheckAction);
+
+    auto* settingsMenu = menuBar()->addMenu(m_japanese ? QStringLiteral("設定") : QStringLiteral("Settings"));
+    settingsMenu->addAction(m_settingsAction);
+    settingsMenu->addSeparator();
+    settingsMenu->addMenu(languageMenu);
 
     auto* helpMenu = menuBar()->addMenu(uiText(QStringLiteral("help")));
-    auto* quickStartAction = helpMenu->addAction(uiText(QStringLiteral("quick_start")));
-    connect(quickStartAction, &QAction::triggered, this, &MainWindow::showStartupGuide);
+    helpMenu->addAction(m_quickStartAction);
     m_helpAction = helpMenu->addAction(uiText(QStringLiteral("usage")));
     m_helpAction->setShortcut(QKeySequence::HelpContents);
     connect(m_helpAction, &QAction::triggered, this, &MainWindow::showUsageHelp);
     m_aboutAction = helpMenu->addAction(uiText(QStringLiteral("about")));
     connect(m_aboutAction, &QAction::triggered, this, &MainWindow::showAboutDialog);
+
+    syncCanvasDisplayOptions();
 
     new QShortcut(QKeySequence(Qt::Key_F), this, [this]() {
         if (!textInputHasFocus()) {
@@ -4069,6 +4441,137 @@ void MainWindow::showAboutDialog() {
                 "・Initial view is c-axis"));
 }
 
+void MainWindow::showAppSettingsDialog() {
+    QDialog dialog(this);
+    dialog.setWindowTitle(m_japanese ? QStringLiteral("アプリ設定") : QStringLiteral("App settings"));
+    auto* layout = new QVBoxLayout(&dialog);
+
+    auto* note = new QLabel(
+        m_japanese
+            ? QStringLiteral("既定設定JSONはEXE内に内包されています。変更内容は構造ファイルではなく次のアプリ設定JSONへ保存します:\n%1").arg(appSettingsFilePath())
+            : QStringLiteral("Default settings JSON is embedded in the EXE. Changes are saved to this app settings JSON, not to structure files:\n%1").arg(appSettingsFilePath()),
+        &dialog);
+    note->setWordWrap(true);
+    layout->addWidget(note);
+
+    auto* tabs = new QTabWidget(&dialog);
+    auto* displayPage = new QWidget(tabs);
+    auto* displayLayout = new QVBoxLayout(displayPage);
+    QHash<QString, QCheckBox*> displayChecks;
+    const QVector<QPair<QString, QString>> displayKeys = {
+        {QStringLiteral("showCell"), uiText(QStringLiteral("cell"))},
+        {QStringLiteral("showBonds"), uiText(QStringLiteral("bonds"))},
+        {QStringLiteral("showOutsideCell"), uiText(QStringLiteral("outside_cell"))},
+        {QStringLiteral("showAxes"), uiText(QStringLiteral("axes"))},
+        {QStringLiteral("showLabels"), uiText(QStringLiteral("labels"))},
+        {QStringLiteral("perspective"), uiText(QStringLiteral("perspective"))},
+        {QStringLiteral("depthCue"), uiText(QStringLiteral("depth_cue"))},
+    };
+    for (const auto& item : displayKeys) {
+        auto* check = new QCheckBox(item.second, displayPage);
+        const bool fallback = item.first == QStringLiteral("showLabels")
+            || item.first == QStringLiteral("perspective")
+            || item.first == QStringLiteral("depthCue")
+            ? false
+            : true;
+        check->setChecked(displayStartupSetting(item.first, fallback));
+        displayChecks.insert(item.first, check);
+        displayLayout->addWidget(check);
+    }
+    auto* atomScale = new QDoubleSpinBox(displayPage);
+    atomScale->setRange(60.0, 180.0);
+    atomScale->setSingleStep(5.0);
+    atomScale->setSuffix(QStringLiteral("%"));
+    atomScale->setValue(displayStartupDoubleSetting(QStringLiteral("atomScalePercent"), 100.0));
+    auto* displayForm = new QFormLayout();
+    displayForm->addRow(m_japanese ? QStringLiteral("起動時の原子サイズ") : QStringLiteral("Startup atom size"), atomScale);
+    displayLayout->addLayout(displayForm);
+    displayLayout->addStretch(1);
+    tabs->addTab(displayPage, m_japanese ? QStringLiteral("起動時表示") : QStringLiteral("Startup display"));
+
+    auto* groupsPage = new QWidget(tabs);
+    auto* groupsLayout = new QVBoxLayout(groupsPage);
+    QHash<QString, QCheckBox*> groupChecks;
+    const QVector<QPair<QString, QString>> groupKeys = {
+        {QStringLiteral("file"), m_japanese ? QStringLiteral("ファイル") : QStringLiteral("File")},
+        {QStringLiteral("placement"), uiText(QStringLiteral("placement_group"))},
+        {QStringLiteral("pose"), uiText(QStringLiteral("pose_group"))},
+        {QStringLiteral("surface"), uiText(QStringLiteral("supercell_group"))},
+        {QStringLiteral("view"), uiText(QStringLiteral("view_group"))},
+        {QStringLiteral("display"), m_japanese ? QStringLiteral("表示") : QStringLiteral("Display")},
+        {QStringLiteral("info"), m_japanese ? QStringLiteral("現在の構造") : QStringLiteral("Current structure")},
+    };
+    for (const auto& item : groupKeys) {
+        auto* check = new QCheckBox(item.second, groupsPage);
+        const bool fallback = item.first != QStringLiteral("file") && item.first != QStringLiteral("info");
+        check->setChecked(appBoolSetting({QStringLiteral("ui"), QStringLiteral("groups"), item.first}, fallback));
+        groupChecks.insert(item.first, check);
+        groupsLayout->addWidget(check);
+    }
+    groupsLayout->addStretch(1);
+    tabs->addTab(groupsPage, m_japanese ? QStringLiteral("右パネル") : QStringLiteral("Right panel"));
+    layout->addWidget(tabs, 1);
+
+    auto* buttons = new QDialogButtonBox(QDialogButtonBox::Ok | QDialogButtonBox::Cancel | QDialogButtonBox::RestoreDefaults, &dialog);
+    connect(buttons->button(QDialogButtonBox::RestoreDefaults), &QPushButton::clicked, &dialog, [&]() {
+        const QJsonObject defaults = defaultAppSettings();
+        for (auto it = displayChecks.begin(); it != displayChecks.end(); ++it) {
+            const bool fallback = it.key() == QStringLiteral("showLabels")
+                || it.key() == QStringLiteral("perspective")
+                || it.key() == QStringLiteral("depthCue")
+                ? false
+                : true;
+            it.value()->setChecked(defaults.value(QStringLiteral("display")).toObject()
+                .value(QStringLiteral("startup")).toObject()
+                .value(it.key()).toBool(fallback));
+        }
+        atomScale->setValue(defaults.value(QStringLiteral("display")).toObject()
+            .value(QStringLiteral("startup")).toObject()
+            .value(QStringLiteral("atomScalePercent")).toDouble(100.0));
+        for (auto it = groupChecks.begin(); it != groupChecks.end(); ++it) {
+            const bool fallback = it.key() != QStringLiteral("file") && it.key() != QStringLiteral("info");
+            it.value()->setChecked(defaults.value(QStringLiteral("ui")).toObject()
+                .value(QStringLiteral("groups")).toObject()
+                .value(it.key()).toBool(fallback));
+        }
+    });
+    connect(buttons, &QDialogButtonBox::accepted, &dialog, &QDialog::accept);
+    connect(buttons, &QDialogButtonBox::rejected, &dialog, &QDialog::reject);
+    layout->addWidget(buttons);
+    dialog.resize(620, 460);
+
+    if (dialog.exec() != QDialog::Accepted) {
+        return;
+    }
+
+    for (auto it = displayChecks.begin(); it != displayChecks.end(); ++it) {
+        setDisplayStartupSetting(it.key(), it.value()->isChecked());
+    }
+    setDisplayStartupDoubleSetting(QStringLiteral("atomScalePercent"), atomScale->value());
+    if (m_showCellCheck != nullptr) m_showCellCheck->setChecked(displayChecks.value(QStringLiteral("showCell"))->isChecked());
+    if (m_showBondsCheck != nullptr) m_showBondsCheck->setChecked(displayChecks.value(QStringLiteral("showBonds"))->isChecked());
+    if (m_showOutsideCellCheck != nullptr) m_showOutsideCellCheck->setChecked(displayChecks.value(QStringLiteral("showOutsideCell"))->isChecked());
+    if (m_showAxesCheck != nullptr) m_showAxesCheck->setChecked(displayChecks.value(QStringLiteral("showAxes"))->isChecked());
+    if (m_showLabelsCheck != nullptr) m_showLabelsCheck->setChecked(displayChecks.value(QStringLiteral("showLabels"))->isChecked());
+    if (m_perspectiveCheck != nullptr) m_perspectiveCheck->setChecked(displayChecks.value(QStringLiteral("perspective"))->isChecked());
+    if (m_depthCueCheck != nullptr) m_depthCueCheck->setChecked(displayChecks.value(QStringLiteral("depthCue"))->isChecked());
+    if (m_atomScaleSpin != nullptr) m_atomScaleSpin->setValue(atomScale->value());
+    syncCanvasDisplayOptions();
+
+    for (auto it = groupChecks.begin(); it != groupChecks.end(); ++it) {
+        const bool checked = it.value()->isChecked();
+        setAppSettingValue({QStringLiteral("ui"), QStringLiteral("groups"), it.key()}, checked);
+        for (QGroupBox* group : findChildren<QGroupBox*>()) {
+            if (group->property("aseappGroupSettingsKey").toString() == it.key()) {
+                group->setChecked(checked);
+            }
+        }
+    }
+    statusBar()->showMessage(
+        m_japanese ? QStringLiteral("アプリ設定を保存しました。") : QStringLiteral("App settings saved."),
+        3500);
+}
+
 void MainWindow::saveStructureAs() {
     QString selectedFilter;
     QString path = QFileDialog::getSaveFileName(this, "Save structure", defaultOpenDirectory() + "/" +
@@ -4278,8 +4781,7 @@ void MainWindow::toggleLanguage() {
     saveCurrentDocumentState();
 
     m_japanese = !m_japanese;
-    QSettings(QStringLiteral("ASEapp"), QStringLiteral("ASEappSurfaceBuilder"))
-        .setValue(QStringLiteral("ui/japanese"), m_japanese);
+    setAppSettingValue({QStringLiteral("ui"), QStringLiteral("japanese")}, m_japanese);
 
     const auto selectedAtomIds = m_selectedAtomIds;
     for (auto* shortcut : findChildren<QShortcut*>(QString(), Qt::FindDirectChildrenOnly)) {
@@ -4507,10 +5009,23 @@ void MainWindow::applySelectedPreset() {
     }
     QString errorMessage;
     const int previousAtomCount = static_cast<int>(m_structure.atoms.size());
-    const auto updated = addPlacementAtom(m_structure, m_selectedAtomIds, rule, &errorMessage);
+    StructureData updated = addPlacementAtom(m_structure, m_selectedAtomIds, rule, &errorMessage);
     if (!errorMessage.isEmpty() && updated.atoms.size() == m_structure.atoms.size()) {
         QMessageBox::warning(this, m_japanese ? QStringLiteral("原子配置") : QStringLiteral("Atom placement"), errorMessage);
         return;
+    }
+    const bool expandedForPlacement = newAtomsOutsideUnitCell(updated, previousAtomCount);
+    if (expandedForPlacement) {
+        const QString title = m_japanese ? QStringLiteral("原子配置") : QStringLiteral("Atom placement");
+        if (!confirmPlacementVacuumExpansion(this, m_japanese, title)) {
+            statusBar()->showMessage(
+                m_japanese
+                    ? QStringLiteral("配置がセル外のためキャンセルしました。")
+                    : QStringLiteral("Placement canceled because the preview is outside the cell."),
+                4000);
+            return;
+        }
+        updated = expandCellToContainAllAtoms(updated);
     }
     replaceStructureFromEdit(updated, QStringLiteral("placement"));
     if (static_cast<int>(m_structure.atoms.size()) > previousAtomCount && !m_structure.atoms.empty()) {
@@ -4525,8 +5040,12 @@ void MainWindow::applySelectedPreset() {
     const int addedCount = static_cast<int>(m_structure.atoms.size()) - previousAtomCount;
     statusBar()->showMessage(
         m_japanese
-            ? QStringLiteral("%1 を %2 個配置しました").arg(rule.element).arg(std::max(addedCount, 1))
-            : QStringLiteral("Placed %1 %2 time(s)").arg(rule.element).arg(std::max(addedCount, 1)),
+            ? (expandedForPlacement
+                ? QStringLiteral("%1 を %2 個配置し、真空層を自動追加しました").arg(rule.element).arg(std::max(addedCount, 1))
+                : QStringLiteral("%1 を %2 個配置しました").arg(rule.element).arg(std::max(addedCount, 1)))
+            : (expandedForPlacement
+                ? QStringLiteral("Placed %1 %2 time(s) after expanding the vacuum region").arg(rule.element).arg(std::max(addedCount, 1))
+                : QStringLiteral("Placed %1 %2 time(s)").arg(rule.element).arg(std::max(addedCount, 1))),
         4000);
 }
 
@@ -4928,6 +5447,20 @@ void MainWindow::placeLoadedPrecursor() {
     }
     updated.dirty = true;
 
+    const bool expandedForPlacement = newAtomsOutsideUnitCell(updated, baseAtomCount);
+    if (expandedForPlacement) {
+        const QString title = m_japanese ? QStringLiteral("前駆体配置") : QStringLiteral("Place precursor");
+        if (!confirmPlacementVacuumExpansion(this, m_japanese, title)) {
+            statusBar()->showMessage(
+                m_japanese
+                    ? QStringLiteral("前駆体配置がセル外のためキャンセルしました。")
+                    : QStringLiteral("Precursor placement canceled because the preview is outside the cell."),
+                4000);
+            return;
+        }
+        updated = expandCellToContainAllAtoms(updated);
+    }
+
     replaceStructureFromEdit(updated, QStringLiteral("precursor"));
     if (!addedAtomIds.empty()) {
         setSelectedAtomIds(addedAtomIds);
@@ -4936,8 +5469,12 @@ void MainWindow::placeLoadedPrecursor() {
     }
     statusBar()->showMessage(
         m_japanese
-            ? QStringLiteral("%1 を %2 箇所へ配置しました（追加 %3 原子）").arg(precursor->name).arg(placementPositions.size()).arg(addedAtomIds.size())
-            : QStringLiteral("Placed %1 at %2 position(s), adding %3 atom(s)").arg(precursor->name).arg(placementPositions.size()).arg(addedAtomIds.size()),
+            ? (expandedForPlacement
+                ? QStringLiteral("%1 を %2 箇所へ配置し、真空層を自動追加しました（追加 %3 原子）").arg(precursor->name).arg(placementPositions.size()).arg(addedAtomIds.size())
+                : QStringLiteral("%1 を %2 箇所へ配置しました（追加 %3 原子）").arg(precursor->name).arg(placementPositions.size()).arg(addedAtomIds.size()))
+            : (expandedForPlacement
+                ? QStringLiteral("Placed %1 at %2 position(s), adding %3 atom(s), after expanding the vacuum region").arg(precursor->name).arg(placementPositions.size()).arg(addedAtomIds.size())
+                : QStringLiteral("Placed %1 at %2 position(s), adding %3 atom(s)").arg(precursor->name).arg(placementPositions.size()).arg(addedAtomIds.size())),
         5000);
 }
 
@@ -5732,26 +6269,21 @@ void MainWindow::showStructureCheckReport() {
 
 void MainWindow::loadCustomBondRanges() {
     m_customBondRanges.clear();
-    QSettings settings(QStringLiteral("ASEapp"), QStringLiteral("ASEappSurfaceBuilder"));
-    const int count = settings.beginReadArray(QStringLiteral("display/customBondRanges"));
-    for (int i = 0; i < count; ++i) {
-        settings.setArrayIndex(i);
-        const QString elementA = settings.value(QStringLiteral("elementA")).toString();
-        const QString elementB = settings.value(QStringLiteral("elementB")).toString();
-        const double minDistance = settings.value(QStringLiteral("minDistance"), 0.0).toDouble();
-        const double maxDistance = settings.value(QStringLiteral("maxDistance"), 0.0).toDouble();
+    const QJsonArray ranges = appSettingValue({QStringLiteral("display"), QStringLiteral("customBondRanges")}).toArray();
+    for (const QJsonValue& value : ranges) {
+        const QJsonObject object = value.toObject();
+        const QString elementA = object.value(QStringLiteral("elementA")).toString();
+        const QString elementB = object.value(QStringLiteral("elementB")).toString();
+        const double minDistance = object.value(QStringLiteral("minDistance")).toDouble(0.0);
+        const double maxDistance = object.value(QStringLiteral("maxDistance")).toDouble(0.0);
         if (maxDistance > 0.0 && maxDistance >= minDistance) {
             m_customBondRanges.insert(vestaBondKey(elementA, elementB), BondDistanceRange{std::max(0.0, minDistance), maxDistance});
         }
     }
-    settings.endArray();
 }
 
 void MainWindow::saveCustomBondRanges() const {
-    QSettings settings(QStringLiteral("ASEapp"), QStringLiteral("ASEappSurfaceBuilder"));
-    settings.remove(QStringLiteral("display/customBondRanges"));
-    settings.beginWriteArray(QStringLiteral("display/customBondRanges"));
-    int row = 0;
+    QJsonArray ranges;
     QStringList keys = m_customBondRanges.keys();
     keys.sort(Qt::CaseInsensitive);
     for (const QString& key : keys) {
@@ -5763,13 +6295,14 @@ void MainWindow::saveCustomBondRanges() const {
         if (elements.size() != 2) {
             continue;
         }
-        settings.setArrayIndex(row++);
-        settings.setValue(QStringLiteral("elementA"), elements.at(0));
-        settings.setValue(QStringLiteral("elementB"), elements.at(1));
-        settings.setValue(QStringLiteral("minDistance"), range.minDistance);
-        settings.setValue(QStringLiteral("maxDistance"), range.maxDistance);
+        QJsonObject object;
+        object.insert(QStringLiteral("elementA"), elements.at(0));
+        object.insert(QStringLiteral("elementB"), elements.at(1));
+        object.insert(QStringLiteral("minDistance"), range.minDistance);
+        object.insert(QStringLiteral("maxDistance"), range.maxDistance);
+        ranges.append(object);
     }
-    settings.endArray();
+    setAppSettingValue({QStringLiteral("display"), QStringLiteral("customBondRanges")}, ranges);
 }
 
 void MainWindow::editBondDistances() {
@@ -5901,6 +6434,17 @@ void MainWindow::syncCanvasDisplayOptions() {
     options.atomScale = m_atomScaleSpin->value() / 100.0;
     options.customBondRanges = m_customBondRanges;
     m_canvas->setDisplayOptions(options);
+    if (!m_persistDisplayStartupSettings) {
+        return;
+    }
+    setDisplayStartupSetting(QStringLiteral("showCell"), options.showCell);
+    setDisplayStartupSetting(QStringLiteral("showBonds"), options.showBonds);
+    setDisplayStartupSetting(QStringLiteral("showOutsideCell"), options.showOutsideCell);
+    setDisplayStartupSetting(QStringLiteral("showAxes"), options.showAxes);
+    setDisplayStartupSetting(QStringLiteral("showLabels"), options.showLabels);
+    setDisplayStartupSetting(QStringLiteral("perspective"), options.perspective);
+    setDisplayStartupSetting(QStringLiteral("depthCue"), options.depthCue);
+    setDisplayStartupDoubleSetting(QStringLiteral("atomScalePercent"), m_atomScaleSpin->value());
 }
 
 void MainWindow::refreshPresetUi() {
@@ -6294,10 +6838,15 @@ std::vector<NativeAtom> MainWindow::placementPreviewAtoms() const {
     previewAtoms.insert(previewAtoms.end(),
         preview.atoms.begin() + static_cast<std::ptrdiff_t>(m_structure.atoms.size()),
         preview.atoms.end());
+    const bool previewOutsideCell = std::any_of(previewAtoms.begin(), previewAtoms.end(), [](const NativeAtom& atom) {
+        return !fractionalInsideUnitCellForPlacement(atom.fractional);
+    });
     for (std::size_t i = 0; i < previewAtoms.size(); ++i) {
         previewAtoms[i].atomId = -100000 - static_cast<int>(i);
         previewAtoms[i].tag = (i == 0)
-            ? (m_japanese ? QStringLiteral("配置プレビュー") : QStringLiteral("placement preview"))
+            ? (previewOutsideCell
+                ? (m_japanese ? QStringLiteral("配置プレビュー（セル外）") : QStringLiteral("placement preview (outside cell)"))
+                : (m_japanese ? QStringLiteral("配置プレビュー") : QStringLiteral("placement preview")))
             : QString();
     }
     return previewAtoms;
@@ -6590,11 +7139,11 @@ QString MainWindow::supercellStatusText() const {
                     .arg(currentAtoms);
         }
         return m_japanese
-            ? QStringLiteral("現在: 初期/基準構造に対して %1\n基準原子数: %2 → 現在原子数: %3\n※真空層操作やセル軸傾き後も変換を保持します。再実行時はこの基準から作り直せます。")
+            ? QStringLiteral("現在: 初期/基準構造に対して %1\n基準原子数: %2 → 現在原子数: %3\n※真空層・配置・セル軸傾き後も変換を保持します。再実行時はこの基準から作り直せます。")
                 .arg(transformLabel)
                 .arg(baseAtoms)
                 .arg(currentAtoms)
-            : QStringLiteral("Current: %1 relative to the initial/base structure\nBase atoms: %2 → current atoms: %3\nVacuum operations and cell-axis tilt keep this transform. Re-running regenerates from this base.")
+            : QStringLiteral("Current: %1 relative to the initial/base structure\nBase atoms: %2 → current atoms: %3\nVacuum, placement, and cell-axis tilt keep this transform. Re-running regenerates from this base.")
                 .arg(transformLabel)
                 .arg(baseAtoms)
                 .arg(currentAtoms);
@@ -6611,8 +7160,12 @@ void MainWindow::setSelectedAtomIds(const std::vector<int>& atomIds) {
 }
 
 bool MainWindow::runAdsorbatePoseSelfTest(const QString& outputDirectory, QString* errorMessage) {
+    const bool previousPersistDisplayStartupSettings = m_persistDisplayStartupSettings;
+    m_persistDisplayStartupSettings = false;
+
     QDir outputDir(outputDirectory);
     if (!outputDir.mkpath(QStringLiteral("."))) {
+        m_persistDisplayStartupSettings = previousPersistDisplayStartupSettings;
         if (errorMessage != nullptr) {
             *errorMessage = QStringLiteral("Failed to create self-test output directory: %1").arg(outputDirectory);
         }
@@ -6642,6 +7195,7 @@ bool MainWindow::runAdsorbatePoseSelfTest(const QString& outputDirectory, QStrin
         }
     };
     auto fail = [&](const QString& message) {
+        m_persistDisplayStartupSettings = previousPersistDisplayStartupSettings;
         if (errorMessage != nullptr) {
             *errorMessage = message;
         }
@@ -7300,5 +7854,6 @@ bool MainWindow::runAdsorbatePoseSelfTest(const QString& outputDirectory, QStrin
     if (errorMessage != nullptr) {
         *errorMessage = QString();
     }
+    m_persistDisplayStartupSettings = previousPersistDisplayStartupSettings;
     return true;
 }

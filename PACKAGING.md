@@ -15,7 +15,7 @@ standalone_exe/                          # 確認済み配布物の配置先
 
 現在リポジトリに同梱している確認済み配布物は次の通りです。
 
-- Windows: `standalone_exe/windows/ASEappSurfaceBuilder-1.3.2-Windows.exe`
+- Windows: `standalone_exe/windows/ASEappSurfaceBuilder-1.3.3-Windows.exe`
 - Windows: `standalone_exe/windows/ASEappSurfaceBuilder-1.3.1-Windows.exe`
 - Windows: `standalone_exe/windows/ASEappSurfaceBuilder-1.2.0-Windows.exe`
 - Windows: `standalone_exe/windows/ASEappSurfaceBuilder-1.1.2-Windows.exe`
@@ -29,16 +29,16 @@ standalone_exe/                          # 確認済み配布物の配置先
 
 次回以降の GitHub Releases には次の名前でアップロードします。
 
-- Windows 単体 launcher: `ASEappSurfaceBuilder-1.3.2-Windows.exe`
-- Windows ZIP: `ASEappSurfaceBuilder-1.3.2-Windows.zip`
-- Linux: `ASEappSurfaceBuilder-1.3.2-Linux.tar.gz`
-- macOS: `ASEappSurfaceBuilder-1.3.2-macOS.dmg`
+- Windows 単体 launcher: `ASEappSurfaceBuilder-1.3.3-Windows.exe`
+- Windows ZIP: `ASEappSurfaceBuilder-1.3.3-Windows.zip`
+- Linux: `ASEappSurfaceBuilder-1.3.3-Linux.tar.gz`
+- macOS: `ASEappSurfaceBuilder-1.3.3-macOS.dmg`
 
 配布物はローカルでは `standalone_exe/` や `code/native_ui/dist/` に生成します。確認済みの最終成果物だけを `standalone_exe/<platform>/` に置き、途中生成物はコミットしません。
 
-Windows では通常、単体 launcher 版だけを配布すれば十分です。
+Windows では通常、単体 launcher 版だけを配布すれば十分です。ローカル自己署名版を配布する場合は、同じフォルダに生成される `ASEappSurfaceBuilderLocalCodeSigning.cer`、`ASEapp-Windows-Trust-LocalCertificate.ps1`、`README-Windows.txt` も併せて渡してください。
 
-ZIP 展開版を渡す場合は、`bin` / `plugins` / `translations` / `README.txt` / `QUICKSTART.txt` / `CHANGELOG.txt` を含むフォルダ一式で渡してください。`bin/ASEappNativeUI.exe` だけを単独で移動すると DLL 不足になります。
+ZIP 展開版を渡す場合は、`bin` / `plugins` / `translations` / `README.txt` / `QUICKSTART.txt` / `CHANGELOG.txt` / `README-Windows.txt` / `ASEapp-Windows-Trust-LocalCertificate.ps1` を含むフォルダ一式で渡してください。ローカル署名証明書がある場合は `ASEappSurfaceBuilderLocalCodeSigning.cer` も同梱されます。`bin/ASEappNativeUI.exe` だけを単独で移動すると DLL 不足になります。
 
 ## アイコン管理
 
@@ -77,10 +77,10 @@ powershell -ExecutionPolicy Bypass -File code/native_ui/package_windows_launcher
 `package_windows_launcher.ps1` は、既定で次を作成します。
 
 ```text
-standalone_exe/windows/ASEappSurfaceBuilder-1.3.2-Windows.exe
+standalone_exe/windows/ASEappSurfaceBuilder-1.3.3-Windows.exe
 ```
 
-現在このリポジトリに同梱している Windows 版は `standalone_exe/windows/ASEappSurfaceBuilder-1.3.2-Windows.exe` です。互換確認用として `standalone_exe/windows/ASEappSurfaceBuilder-1.3.1-Windows.exe`、`standalone_exe/windows/ASEappSurfaceBuilder-1.2.0-Windows.exe`、`standalone_exe/windows/ASEappSurfaceBuilder-1.1.2-Windows.exe`、`standalone_exe/windows/ASEappSurfaceBuilder-1.1.1-Windows.exe`、`standalone_exe/windows/ASEappSurfaceBuilder-1.1.0-Windows.exe`、`standalone_exe/windows/ASEappSurfaceBuilder-1.0.0-Windows.exe` も残しています。
+現在このリポジトリに同梱している Windows 版は `standalone_exe/windows/ASEappSurfaceBuilder-1.3.3-Windows.exe` です。互換確認用として `standalone_exe/windows/ASEappSurfaceBuilder-1.3.2-Windows.exe`、`standalone_exe/windows/ASEappSurfaceBuilder-1.3.1-Windows.exe`、`standalone_exe/windows/ASEappSurfaceBuilder-1.2.0-Windows.exe`、`standalone_exe/windows/ASEappSurfaceBuilder-1.1.2-Windows.exe`、`standalone_exe/windows/ASEappSurfaceBuilder-1.1.1-Windows.exe`、`standalone_exe/windows/ASEappSurfaceBuilder-1.1.0-Windows.exe`、`standalone_exe/windows/ASEappSurfaceBuilder-1.0.0-Windows.exe` も残しています。
 
 ### ローカル署名（開発確認用）
 
@@ -91,19 +91,21 @@ powershell -ExecutionPolicy Bypass -File code/native_ui/tools/install_local_code
 powershell -ExecutionPolicy Bypass -File code/native_ui/package_windows_launcher.ps1
 ```
 
-`package_windows_launcher.ps1` は、既定で `CN=ASEapp Surface Builder Local Code Signing` の証明書があれば、単体 launcher と同梱される ASEapp 製 `.exe` だけを署名します。Qt / OpenSSL / FreeType など第三者 DLL は Windows Smart App Control の reputation 判定を壊さないよう、元のハッシュを保ったまま同梱します。明示する場合は次を使ってください。
+`install_local_codesign_cert.ps1` は、`CN=ASEapp Surface Builder Local Code Signing` の自己署名証明書を現在のユーザーに登録し、公開証明書を `code/native_ui/certs/ASEappSurfaceBuilderLocalCodeSigning.cer` へ書き出します。この `certs/` フォルダはローカル生成物としてコミットしません。
+
+`package_windows_launcher.ps1` は、既定でこの証明書があれば、単体 launcher と同梱される ASEapp 製 `.exe` だけを署名します。さらに、配布先 Windows で信頼登録できるように、公開証明書、`ASEapp-Windows-Trust-LocalCertificate.ps1`、`README-Windows.txt` を Windows ZIP と `standalone_exe/windows/` に同梱します。Qt / OpenSSL / FreeType など第三者 DLL は Windows Smart App Control の reputation 判定を壊さないよう、元のハッシュを保ったまま同梱します。明示する場合は次を使ってください。
 
 ```powershell
 $env:ASEAPP_CODESIGN_THUMBPRINT = "<証明書の Thumbprint>"
 powershell -ExecutionPolicy Bypass -File code/native_ui/package_windows_launcher.ps1
 ```
 
-この自己署名はローカル開発確認向けです。Smart App Control / Windows Application Control 環境では、第三者 DLL まで自己署名で再署名すると Windows の reputation 判定で止まりやすくなるため、再署名しません。GitHub Releases で他の人へ配布する正式版は、Microsoft Trusted Signing や OV/EV などの信頼済みコード署名で ASEapp 製バイナリを署名してください。
+この自己署名はローカル開発確認向けです。配布先で `ASEapp-Windows-Trust-LocalCertificate.ps1` を実行すると、同梱の公開証明書を現在のユーザーの `Trusted Root Certification Authorities` と `Trusted Publishers` に登録し、ASEapp ファイルのダウンロード隔離マークを解除します。ただし、SmartScreen / Smart App Control / Windows Application Control 環境では端末側ポリシーや reputation 判定で止まることがあります。GitHub Releases で他の人へ配布する正式版は、Microsoft Trusted Signing や OV/EV などの信頼済みコード署名で ASEapp 製バイナリを署名してください。
 
 ## 展開版を確認する
 
 ```powershell
-$zip = (Resolve-Path 'code/native_ui/dist/ASEappSurfaceBuilder-1.3.2-Windows.zip').Path
+$zip = (Resolve-Path 'code/native_ui/dist/ASEappSurfaceBuilder-1.3.3-Windows.zip').Path
 $target = Join-Path $env:TEMP 'aseapp_surface_builder_verify'
 if (Test-Path $target) { Remove-Item -LiteralPath $target -Recurse -Force }
 Expand-Archive -LiteralPath $zip -DestinationPath $target -Force
@@ -136,10 +138,10 @@ macOS では次のスクリプトを使ってください。
 ./code/native_ui/package_macos.sh
 ```
 
-このスクリプトは、Release ビルド、Qt ランタイム同梱、自己署名、DMG 作成、署名検証、DMG 検証をまとめて実行します。`project(... VERSION ...)` の値に合わせてファイル名が決まり、v1.3.2 では次を作成します。
+このスクリプトは、Release ビルド、Qt ランタイム同梱、自己署名、DMG 作成、署名検証、DMG 検証をまとめて実行します。`project(... VERSION ...)` の値に合わせてファイル名が決まり、v1.3.3 では次を作成します。
 
 ```text
-standalone_exe/macos/ASEappSurfaceBuilder-1.3.2-macOS.dmg
+standalone_exe/macos/ASEappSurfaceBuilder-1.3.3-macOS.dmg
 ```
 
 互換確認用として `standalone_exe/macos/ASEappSurfaceBuilder-1.2.0-macOS.dmg`、`standalone_exe/macos/ASEappSurfaceBuilder-1.1.0-macOS.dmg`、`standalone_exe/macos/ASEappSurfaceBuilder-1.0.0-macOS.dmg` も残しています。

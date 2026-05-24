@@ -1,0 +1,28 @@
+﻿{
+  "schemaVersion": 1,
+  "ui": {
+    "japanese": true,
+    "groups": {
+      "file": false,
+      "placement": true,
+      "pose": true,
+      "surface": true,
+      "view": true,
+      "display": true,
+      "info": false
+    }
+  },
+  "display": {
+    "startup": {
+      "showCell": true,
+      "showBonds": true,
+      "showOutsideCell": true,
+      "showAxes": true,
+      "showLabels": false,
+      "perspective": false,
+      "depthCue": false,
+      "atomScalePercent": 100.0
+    },
+    "customBondRanges": []
+  }
+}

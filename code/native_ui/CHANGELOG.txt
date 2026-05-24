@@ -4,12 +4,23 @@ ASEapp Surface Builder CHANGELOG
 Unreleased
 ----------
 
+Version 1.3.3 - Vacuum placement and large-scene UX fixes
+---------------------------------------------------------
+- Add vacuum layers incrementally so adding top/bottom vacuum no longer removes the previously added opposite side.
+- Mark out-of-cell placement previews in red and ask before auto-expanding the vacuum region to place them.
+- Keep the current supercell transform label through vacuum, atom placement, precursor placement, and termination edits.
+- Make Ctrl+drag range selection follow the visible rectangle exactly instead of selecting atoms just outside it.
+- Add Alt+left-drag panning, reduce duplicate projection work, cull off-screen primitives, keep two-color bond gradients, switch large/dragging atom fills to a flat fast-render path, and limit expensive periodic-image bond generation for very large structures.
+- Add a screen-space atom selection index, bucketed fast depth ordering for large interactive scenes, persisted startup display defaults, and collapsible right-side tool sections.
+- Embed the default app settings JSON in the executable resources, save user app settings to a dedicated app config JSON instead of structure files, and add a Settings menu/dialog plus menu-bar access to the main side-panel operations.
+
 Version 1.3.2 - Bond display cutoff and macOS startup fix
 ---------------------------------------------------------
 - Changed the primary bond display UI to edit only the maximum displayed bond distance for each species pair, such as Ga-N, Ga-H, and N-H.
 - Kept element-pair rows ordered by the element order in the loaded structure instead of alphabetic order.
 - Added a GUI self-test that verifies Ga/N/H structures collapse to Ga-N, Ga-H, and N-H summaries and that lowering a display cutoff hides bonds without moving atoms.
 - Added a macOS startup splash screen that appears before the main window is ready.
+- Added Windows self-signed certificate trust helper files for local development-signed packages.
 
 Version 1.3.1 - Windows Smart App Control packaging fix
 ----------------------------------------------------------

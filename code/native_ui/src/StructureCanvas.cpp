@@ -19,6 +19,7 @@
 #include <cstdint>
 #include <iterator>
 #include <limits>
+#include <unordered_set>
 
 namespace {
 constexpr double kAtomRadiusSceneFactor = 0.50;
@@ -31,6 +32,15 @@ constexpr double kAtomRadiusPixelFloorMax = 13.0;
 constexpr double kMinimumPhysicalAtomDistance = 0.50;
 constexpr double kBondWidthPixels = 2.8;
 constexpr double kPreviewBondWidthPixels = 2.4;
+constexpr double kPickIndexCellSize = 48.0;
+
+qint64 screenGridKey(int x, int y) {
+    return (static_cast<qint64>(x) << 32) ^ static_cast<quint32>(y);
+}
+
+int screenGridCoord(double value) {
+    return static_cast<int>(std::floor(value / kPickIndexCellSize));
+}
 
 struct SpatialCellKey {
     int x = 0;
@@ -273,6 +283,7 @@ void StructureCanvas::setDisplayOptions(const DisplayOptions& options) {
     if (rebuildBonds) {
         rebuildSceneCache();
     }
+    invalidatePickIndex();
     update();
 }
 
@@ -290,6 +301,7 @@ void StructureCanvas::setStructure(const StructureData& structure) {
     m_selectedAtomIds.clear();
     updateInteractionCursor();
     rebuildSceneCache();
+    invalidatePickIndex();
     update();
 }
 
@@ -309,6 +321,7 @@ void StructureCanvas::resetView() {
     m_zoom = 1.0;
     m_panOffset = {};
     m_focusAtomId = -1;
+    invalidatePickIndex();
     update();
 }
 
@@ -353,6 +366,7 @@ void StructureCanvas::updateInteractionCursor() {
 void StructureCanvas::fitToStructure() {
     m_panOffset = {};
     m_zoom = 1.0;
+    invalidatePickIndex();
     update();
 }
 
@@ -364,11 +378,13 @@ void StructureCanvas::focusAtom(int atomId) {
 void StructureCanvas::rotateBy(double yawDelta, double pitchDelta) {
     const QPoint delta(static_cast<int>(std::lround(yawDelta)), static_cast<int>(std::lround(pitchDelta)));
     rotateBasisFromDrag(delta);
+    invalidatePickIndex();
     update();
 }
 
 void StructureCanvas::panBy(double dx, double dy) {
     m_panOffset += QPointF(dx, dy);
+    invalidatePickIndex();
     update();
 }
 
@@ -377,6 +393,7 @@ void StructureCanvas::zoomBy(double factor) {
         return;
     }
     m_zoom = std::clamp(m_zoom * factor, 0.35, 4.0);
+    invalidatePickIndex();
     update();
 }
 
@@ -392,6 +409,7 @@ void StructureCanvas::zoomAt(double factor, const QPointF& position) {
     m_zoom = std::clamp(m_zoom * factor, 0.35, 4.0);
     const double appliedFactor = oldZoom <= 1.0e-9 ? 1.0 : (m_zoom / oldZoom);
     m_panOffset += (focusFromViewCenter - m_panOffset) * (1.0 - appliedFactor);
+    invalidatePickIndex();
     update();
 }
 
@@ -407,6 +425,7 @@ void StructureCanvas::setViewDirection(const QVector3D& direction, const QVector
     if (resetPan) {
         m_panOffset = {};
     }
+    invalidatePickIndex();
     update();
 }
 
@@ -444,6 +463,7 @@ void StructureCanvas::setAxisAlignedView(const QVector3D& horizontalAxis, const 
     if (resetPan) {
         m_panOffset = {};
     }
+    invalidatePickIndex();
     update();
 }
 
@@ -540,9 +560,11 @@ void StructureCanvas::rotateBasisFromDrag(const QPoint& delta) {
     } else {
         m_viewUp.normalize();
     }
+    invalidatePickIndex();
 }
 
 void StructureCanvas::rebuildSceneCache() {
+    invalidatePickIndex();
     m_cachedBonds.clear();
     m_cachedAtomImages.clear();
     m_cachedCenter = {};
@@ -624,7 +646,10 @@ std::vector<StructureCanvas::BondSegment> StructureCanvas::buildBondPairs() cons
         return bonds;
     }
     const auto& atoms = m_structure.atoms;
-    const bool usePeriodicImages = m_displayOptions.showOutsideCell && hasNonDegenerateCell(m_structure.cellVectors);
+    constexpr std::size_t kMaxAtomsForPeriodicImageBonds = 4500;
+    const bool usePeriodicImages = m_displayOptions.showOutsideCell
+        && hasNonDegenerateCell(m_structure.cellVectors)
+        && atoms.size() <= kMaxAtomsForPeriodicImageBonds;
     const int minImage = usePeriodicImages ? -1 : 0;
     const int maxImage = usePeriodicImages ? 1 : 0;
     const double cellSize = std::max(0.5, maximumBondCutoffWithCustomRanges(m_displayOptions.customBondRanges));
@@ -711,10 +736,19 @@ int StructureCanvas::pickAtomAt(const QPoint& pos) const {
     return candidates.empty() ? -1 : candidates.front();
 }
 
-std::vector<int> StructureCanvas::pickAtomsAt(const QPoint& pos) const {
+void StructureCanvas::invalidatePickIndex() const {
+    m_pickIndexDirty = true;
+}
+
+void StructureCanvas::rebuildPickIndex() const {
+    m_pickIndexEntries.clear();
+    m_pickIndexGrid.clear();
+    m_pickIndexCanvasSize = size();
+    m_pickIndexDirty = false;
     if (m_structure.atoms.empty()) {
-        return {};
+        return;
     }
+
     const QRectF viewport = rect().adjusted(18, 18, -18, -18);
     const QVector3D center = sceneCenter();
     const double scale = sceneScale(viewport, center);
@@ -724,28 +758,69 @@ std::vector<int> StructureCanvas::pickAtomsAt(const QPoint& pos) const {
         m_cachedNearestAtomDistance,
         m_cachedMaxAtomRadius);
 
+    m_pickIndexEntries.reserve(m_cachedAtomImages.size());
+    m_pickIndexGrid.reserve(static_cast<int>(m_cachedAtomImages.size() * 2));
+    for (const auto& image : m_cachedAtomImages) {
+        if (image.atom < 0 || image.atom >= static_cast<int>(m_structure.atoms.size())) {
+            continue;
+        }
+        const auto& atom = m_structure.atoms[static_cast<std::size_t>(image.atom)];
+        const QVector3D local = atom.cartesian + image.shift - center;
+        const auto rotated = rotatePoint(local);
+        const double perspective = depthPerspective(rotated.z());
+        const QPointF point(
+            viewport.center().x() + m_panOffset.x() + rotated.x() * scale * perspective,
+            viewport.center().y() + m_panOffset.y() - rotated.y() * scale * perspective);
+        const double radius = hitAtomRadius(atom, scale, perspective, m_displayOptions.atomScale, densityScale);
+        const int entryIndex = static_cast<int>(m_pickIndexEntries.size());
+        m_pickIndexEntries.push_back({atom.atomId, point, radius, rotated.z()});
+
+        const QRectF hitBounds(
+            point.x() - radius - 6.0,
+            point.y() - radius - 6.0,
+            (radius + 6.0) * 2.0,
+            (radius + 6.0) * 2.0);
+        const int minX = screenGridCoord(hitBounds.left());
+        const int maxX = screenGridCoord(hitBounds.right());
+        const int minY = screenGridCoord(hitBounds.top());
+        const int maxY = screenGridCoord(hitBounds.bottom());
+        for (int gx = minX; gx <= maxX; ++gx) {
+            for (int gy = minY; gy <= maxY; ++gy) {
+                m_pickIndexGrid[screenGridKey(gx, gy)].push_back(entryIndex);
+            }
+        }
+    }
+}
+
+std::vector<int> StructureCanvas::pickAtomsAt(const QPoint& pos) const {
+    if (m_structure.atoms.empty()) {
+        return {};
+    }
+    if (m_pickIndexDirty || m_pickIndexCanvasSize != size()) {
+        rebuildPickIndex();
+    }
+
     struct Candidate {
         int atomId = -1;
         double depth = 0.0;
         double distance = 0.0;
     };
     std::vector<Candidate> candidates;
-    candidates.reserve(m_cachedAtomImages.size());
-    for (const auto& image : m_cachedAtomImages) {
-        if (image.atom < 0 || image.atom >= static_cast<int>(m_structure.atoms.size())) {
+    const auto gridIt = m_pickIndexGrid.constFind(screenGridKey(screenGridCoord(pos.x()), screenGridCoord(pos.y())));
+    if (gridIt == m_pickIndexGrid.cend()) {
+        return {};
+    }
+    candidates.reserve(static_cast<std::size_t>(gridIt.value().size()));
+    for (int entryIndex : gridIt.value()) {
+        if (entryIndex < 0 || entryIndex >= static_cast<int>(m_pickIndexEntries.size())) {
             continue;
         }
-        const auto& atom = m_structure.atoms[static_cast<std::size_t>(image.atom)];
-        const QVector3D cartesian = atom.cartesian + image.shift;
-        const auto rotated = rotatePoint(cartesian - center);
-        const double perspective = depthPerspective(rotated.z());
-        const QPointF point = projectPoint(cartesian - center, viewport, scale);
-        const double radius = hitAtomRadius(atom, scale, perspective, m_displayOptions.atomScale, densityScale);
-        const double distance = QLineF(point, pos).length();
-        if (distance > radius + 6.0) {
+        const auto& entry = m_pickIndexEntries[static_cast<std::size_t>(entryIndex)];
+        const double distance = QLineF(entry.point, pos).length();
+        if (distance > entry.radius + 6.0) {
             continue;
         }
-        candidates.push_back({atom.atomId, rotated.z(), distance});
+        candidates.push_back({entry.atomId, entry.depth, distance});
     }
     std::sort(candidates.begin(), candidates.end(), [](const Candidate& a, const Candidate& b) {
         // The canvas renders atoms as opaque 2-D sphere billboards. For that
@@ -757,6 +832,67 @@ std::vector<int> StructureCanvas::pickAtomsAt(const QPoint& pos) const {
         }
         if (std::abs(a.distance - b.distance) > 1.0e-6) {
             return a.distance < b.distance;
+        }
+        return a.atomId < b.atomId;
+    });
+
+    std::vector<int> atomIds;
+    atomIds.reserve(candidates.size());
+    std::unordered_set<int> emittedAtomIds;
+    emittedAtomIds.reserve(candidates.size());
+    for (const auto& candidate : candidates) {
+        if (!emittedAtomIds.insert(candidate.atomId).second) {
+            continue;
+        }
+        atomIds.push_back(candidate.atomId);
+    }
+    return atomIds;
+}
+
+std::vector<int> StructureCanvas::pickAtomsInScreenRect(const QRectF& selection) const {
+    if (m_structure.atoms.empty()) {
+        return {};
+    }
+    if (m_pickIndexDirty || m_pickIndexCanvasSize != size()) {
+        rebuildPickIndex();
+    }
+    const QRectF selectionTarget = selection.normalized();
+    const int minX = screenGridCoord(selectionTarget.left());
+    const int maxX = screenGridCoord(selectionTarget.right());
+    const int minY = screenGridCoord(selectionTarget.top());
+    const int maxY = screenGridCoord(selectionTarget.bottom());
+    std::vector<unsigned char> visited(m_pickIndexEntries.size(), 0);
+
+    struct Candidate {
+        int atomId = -1;
+        double depth = 0.0;
+    };
+    std::vector<Candidate> candidates;
+    for (int gx = minX; gx <= maxX; ++gx) {
+        for (int gy = minY; gy <= maxY; ++gy) {
+            const auto it = m_pickIndexGrid.constFind(screenGridKey(gx, gy));
+            if (it == m_pickIndexGrid.cend()) {
+                continue;
+            }
+            for (int entryIndex : it.value()) {
+                if (entryIndex < 0 || entryIndex >= static_cast<int>(m_pickIndexEntries.size())) {
+                    continue;
+                }
+                if (visited[static_cast<std::size_t>(entryIndex)] != 0) {
+                    continue;
+                }
+                visited[static_cast<std::size_t>(entryIndex)] = 1;
+                const auto& entry = m_pickIndexEntries[static_cast<std::size_t>(entryIndex)];
+                if (!selectionTarget.contains(entry.point)) {
+                    continue;
+                }
+                candidates.push_back({entry.atomId, entry.depth});
+            }
+        }
+    }
+    std::sort(candidates.begin(), candidates.end(), [](const Candidate& a, const Candidate& b) {
+        if (std::abs(a.depth - b.depth) > 1.0e-6) {
+            return a.depth > b.depth;
         }
         return a.atomId < b.atomId;
     });
@@ -784,7 +920,12 @@ int StructureCanvas::pickNextCtrlAtomAt(const QPoint& pos) const {
 
 void StructureCanvas::paintEvent(QPaintEvent*) {
     QPainter painter(this);
-    painter.setRenderHint(QPainter::Antialiasing, true);
+    const std::size_t primitiveCount = m_cachedAtomImages.size() + m_previewAtoms.size() + m_cachedBonds.size();
+    const bool activeInteraction = m_activeButton != Qt::NoButton || m_draggingSelection || m_ctrlSelectingAtoms;
+    const bool fastRender = (activeInteraction && m_structure.atoms.size() >= 1200)
+        || m_structure.atoms.size() >= 3500
+        || primitiveCount >= 9000;
+    painter.setRenderHint(QPainter::Antialiasing, !fastRender);
     painter.setRenderHint(QPainter::TextAntialiasing, true);
     painter.fillRect(rect(), backgroundColor());
 
@@ -796,6 +937,15 @@ void StructureCanvas::paintEvent(QPaintEvent*) {
         m_displayOptions.atomScale,
         m_cachedNearestAtomDistance,
         m_cachedMaxAtomRadius);
+    const auto projectRotatedPoint = [&](const QVector3D& rotated, double perspective) {
+        return QPointF(
+            viewport.center().x() + m_panOffset.x() + rotated.x() * scale * perspective,
+            viewport.center().y() + m_panOffset.y() - rotated.y() * scale * perspective);
+    };
+    const QRectF cullRect = viewport.adjusted(-64.0, -64.0, 64.0, 64.0);
+    const auto lineIntersectsCullRect = [&](const QPointF& a, const QPointF& b) {
+        return cullRect.intersects(QRectF(a, b).normalized().adjusted(-6.0, -6.0, 6.0, 6.0));
+    };
 
     if (m_displayOptions.showCell) {
         painter.setPen(QPen(QColor("#202020"), 1.1));
@@ -819,8 +969,8 @@ void StructureCanvas::paintEvent(QPaintEvent*) {
             rect().adjusted(18, 0, -18, -14),
             Qt::AlignBottom | Qt::AlignLeft,
             m_japanese
-                ? QStringLiteral("クリック: 開く   左ドラッグ: 回転   右/中ドラッグ: パン   ホイール: ズーム")
-                : QStringLiteral("Click: open file   Left drag: rotate   Right/Middle drag: pan   Wheel: zoom"));
+                ? QStringLiteral("クリック: 開く   左ドラッグ: 回転   Alt+左/右/中ドラッグ: パン   ホイール: ズーム")
+                : QStringLiteral("Click: open file   Left drag: rotate   Alt+left/Right/Middle drag: pan   Wheel: zoom"));
         return;
     }
 
@@ -832,6 +982,7 @@ void StructureCanvas::paintEvent(QPaintEvent*) {
         bool focus;
         bool selected;
         bool preview;
+        bool outOfCell;
         int atomId;
         int selectionOrder;
         QString label;
@@ -844,6 +995,7 @@ void StructureCanvas::paintEvent(QPaintEvent*) {
         QColor colorA;
         QColor colorB;
         bool preview;
+        bool outOfCell;
     };
 
     struct PaintItem {
@@ -875,12 +1027,18 @@ void StructureCanvas::paintEvent(QPaintEvent*) {
             const QVector3D bEdge = bCart - direction * static_cast<float>(trimB);
             const auto aRot = rotatePoint(aEdge);
             const auto bRot = rotatePoint(bEdge);
+            const QPointF aPoint = projectRotatedPoint(aRot, depthPerspective(aRot.z()));
+            const QPointF bPoint = projectRotatedPoint(bRot, depthPerspective(bRot.z()));
+            if (!lineIntersectsCullRect(aPoint, bPoint)) {
+                continue;
+            }
             paintBonds.push_back({
-                projectPoint(aEdge, viewport, scale),
-                projectPoint(bEdge, viewport, scale),
+                aPoint,
+                bPoint,
                 (aRot.z() + bRot.z()) * 0.5 - 0.35,
                 a.color,
                 b.color,
+                false,
                 false
             });
         }
@@ -888,10 +1046,6 @@ void StructureCanvas::paintEvent(QPaintEvent*) {
             for (int j = i + 1; j < static_cast<int>(m_previewAtoms.size()); ++j) {
                 const auto& a = m_previewAtoms[static_cast<std::size_t>(i)];
                 const auto& b = m_previewAtoms[static_cast<std::size_t>(j)];
-                if (!shouldDisplayAtom(a, m_displayOptions, m_structure.cellVectors)
-                    || !shouldDisplayAtom(b, m_displayOptions, m_structure.cellVectors)) {
-                    continue;
-                }
                 BondDistanceRange range;
                 if (!effectiveBondRange(m_displayOptions.customBondRanges, a.element, b.element, &range)) {
                     range = BondDistanceRange{0.0, (vestaElementRadius(a.element) + vestaElementRadius(b.element)) * 0.85};
@@ -912,13 +1066,19 @@ void StructureCanvas::paintEvent(QPaintEvent*) {
                 const QVector3D bEdge = b.cartesian - center - direction * static_cast<float>(trimB);
                 const auto aRot = rotatePoint(aEdge);
                 const auto bRot = rotatePoint(bEdge);
+                const QPointF aPoint = projectRotatedPoint(aRot, depthPerspective(aRot.z()));
+                const QPointF bPoint = projectRotatedPoint(bRot, depthPerspective(bRot.z()));
+                if (!lineIntersectsCullRect(aPoint, bPoint)) {
+                    continue;
+                }
                 paintBonds.push_back({
-                    projectPoint(aEdge, viewport, scale),
-                    projectPoint(bEdge, viewport, scale),
+                    aPoint,
+                    bPoint,
                     (aRot.z() + bRot.z()) * 0.5 - 0.35,
                     QColor("#2D7FF9"),
                     QColor("#2D7FF9"),
-                    true
+                    true,
+                    !fractionalInsideUnitCell(a.fractional) || !fractionalInsideUnitCell(b.fractional)
                 });
             }
         }
@@ -936,13 +1096,20 @@ void StructureCanvas::paintEvent(QPaintEvent*) {
         const auto selectedIt = std::find(m_selectedAtomIds.begin(), m_selectedAtomIds.end(), atom.atomId);
         const bool primaryImage = image.imageA == 0 && image.imageB == 0 && image.imageC == 0;
         const bool selected = primaryImage && selectedIt != m_selectedAtomIds.end();
+        const double perspective = depthPerspective(rotated.z());
+        const QPointF point = projectRotatedPoint(rotated, perspective);
+        const double radius = screenAtomRadius(atom, scale, perspective, m_displayOptions.atomScale, densityScale);
+        if (!QRectF(point.x() - radius, point.y() - radius, radius * 2.0, radius * 2.0).intersects(cullRect)) {
+            continue;
+        }
         paintAtoms.push_back({
-            projectPoint(cartesian - center, viewport, scale),
+            point,
             rotated.z(),
-            screenAtomRadius(atom, scale, depthPerspective(rotated.z()), m_displayOptions.atomScale, densityScale),
+            radius,
             atom.color,
             primaryImage && atom.atomId == m_focusAtomId,
             selected,
+            false,
             false,
             atom.atomId,
             selected ? static_cast<int>(std::distance(m_selectedAtomIds.begin(), selectedIt)) + 1 : 0,
@@ -952,20 +1119,24 @@ void StructureCanvas::paintEvent(QPaintEvent*) {
         });
     }
     for (const auto& atom : m_previewAtoms) {
-        if (!shouldDisplayAtom(atom, m_displayOptions, m_structure.cellVectors)) {
-            continue;
-        }
         const auto rotated = rotatePoint(atom.cartesian - center);
         QColor previewColor = atom.color.isValid() ? atom.color : QColor("#2D7FF9");
         previewColor.setAlpha(105);
+        const double perspective = depthPerspective(rotated.z());
+        const QPointF point = projectRotatedPoint(rotated, perspective);
+        const double radius = screenAtomRadius(atom, scale, perspective, m_displayOptions.atomScale, densityScale);
+        if (!QRectF(point.x() - radius, point.y() - radius, radius * 2.0, radius * 2.0).intersects(cullRect)) {
+            continue;
+        }
         paintAtoms.push_back({
-            projectPoint(atom.cartesian - center, viewport, scale),
+            point,
             rotated.z(),
-            screenAtomRadius(atom, scale, depthPerspective(rotated.z()), m_displayOptions.atomScale, densityScale),
+            radius,
             previewColor,
             false,
             false,
             true,
+            !fractionalInsideUnitCell(atom.fractional),
             atom.atomId,
             0,
             atom.tag
@@ -980,7 +1151,7 @@ void StructureCanvas::paintEvent(QPaintEvent*) {
     for (int i = 0; i < static_cast<int>(paintAtoms.size()); ++i) {
         paintItems.push_back({paintAtoms[static_cast<std::size_t>(i)].depth, true, i});
     }
-    std::sort(paintItems.begin(), paintItems.end(), [](const PaintItem& a, const PaintItem& b) {
+    const auto paintItemLess = [](const PaintItem& a, const PaintItem& b) {
         if (std::abs(a.depth - b.depth) > 1.0e-9) {
             return a.depth < b.depth;  // back-to-front: larger depth is closer to the viewer
         }
@@ -988,7 +1159,38 @@ void StructureCanvas::paintEvent(QPaintEvent*) {
             return !a.atom && b.atom;  // draw bonds first at the same depth so atoms cap bond ends
         }
         return a.index < b.index;
-    });
+    };
+    if (fastRender && paintItems.size() > 4096) {
+        constexpr int kDepthBucketCount = 192;
+        double minDepth = std::numeric_limits<double>::max();
+        double maxDepth = std::numeric_limits<double>::lowest();
+        for (const auto& item : paintItems) {
+            minDepth = std::min(minDepth, item.depth);
+            maxDepth = std::max(maxDepth, item.depth);
+        }
+        if (maxDepth - minDepth > 1.0e-9 && std::isfinite(minDepth) && std::isfinite(maxDepth)) {
+            std::array<std::vector<PaintItem>, kDepthBucketCount> buckets;
+            for (const auto& item : paintItems) {
+                const double normalized = (item.depth - minDepth) / (maxDepth - minDepth);
+                const int bucket = std::clamp(
+                    static_cast<int>(normalized * static_cast<double>(kDepthBucketCount - 1)),
+                    0,
+                    kDepthBucketCount - 1);
+                buckets[static_cast<std::size_t>(bucket)].push_back(item);
+            }
+            paintItems.clear();
+            for (auto& bucket : buckets) {
+                if (bucket.size() > 1 && bucket.size() < 128) {
+                    std::sort(bucket.begin(), bucket.end(), paintItemLess);
+                }
+                paintItems.insert(paintItems.end(), bucket.begin(), bucket.end());
+            }
+        } else {
+            std::sort(paintItems.begin(), paintItems.end(), paintItemLess);
+        }
+    } else {
+        std::sort(paintItems.begin(), paintItems.end(), paintItemLess);
+    }
 
     auto drawTextOutline = [&](const QPointF& centerPoint, const QString& text, const QColor& fillColor, const QColor& outlineColor, const QFont& font) {
         painter.setFont(font);
@@ -1006,7 +1208,7 @@ void StructureCanvas::paintEvent(QPaintEvent*) {
 
     auto drawBond = [&](const PaintedBond& bond) {
         if (bond.preview) {
-            QColor bondColor("#2D7FF9");
+            QColor bondColor(bond.outOfCell ? QColor("#D92D20") : QColor("#2D7FF9"));
             bondColor.setAlpha(150);
             painter.setPen(QPen(bondColor, kPreviewBondWidthPixels, Qt::DashLine));
             painter.drawLine(bond.a, bond.b);
@@ -1040,22 +1242,28 @@ void StructureCanvas::paintEvent(QPaintEvent*) {
             atomColor.setAlpha(255);
         }
         if (atom.preview) {
-            painter.setPen(QPen(QColor("#2D7FF9"), 1.8, Qt::DashLine));
+            const QColor previewAccent = atom.outOfCell ? QColor("#D92D20") : QColor("#2D7FF9");
+            painter.setPen(QPen(previewAccent, 1.8, Qt::DashLine));
         } else {
             const double outlineWidth = std::clamp(atom.radius * 0.18, 0.25, 1.0);
             const double focusWidth = std::clamp(atom.radius * 0.34, 0.8, 2.0);
             painter.setPen(atom.focus ? QPen(QColor("#000000"), focusWidth) : QPen(QColor("#404040"), outlineWidth));
         }
-        QRadialGradient gradient(atom.pos - QPointF(atom.radius * 0.35, atom.radius * 0.35), atom.radius * 1.10);
-        gradient.setColorAt(0.0, atom.preview ? QColor(255, 255, 255, 185) : QColor(255, 255, 255, 255));
-        gradient.setColorAt(0.18, atomColor.lighter(185));
-        gradient.setColorAt(0.55, atomColor.lighter(128));
-        gradient.setColorAt(0.90, atomColor);
-        gradient.setColorAt(1.0, atomColor.darker(112));
-        painter.setBrush(gradient);
+        if (fastRender) {
+            painter.setBrush(atomColor);
+        } else {
+            QRadialGradient gradient(atom.pos - QPointF(atom.radius * 0.35, atom.radius * 0.35), atom.radius * 1.10);
+            gradient.setColorAt(0.0, atom.preview ? QColor(255, 255, 255, 185) : QColor(255, 255, 255, 255));
+            gradient.setColorAt(0.18, atomColor.lighter(185));
+            gradient.setColorAt(0.55, atomColor.lighter(128));
+            gradient.setColorAt(0.90, atomColor);
+            gradient.setColorAt(1.0, atomColor.darker(112));
+            painter.setBrush(gradient);
+        }
         painter.drawEllipse(atom.pos, atom.radius, atom.radius);
         if (atom.preview) {
-            painter.setPen(QPen(QColor("#2D7FF9"), 1.2, Qt::DashLine));
+            const QColor previewAccent = atom.outOfCell ? QColor("#D92D20") : QColor("#2D7FF9");
+            painter.setPen(QPen(previewAccent, 1.2, Qt::DashLine));
             painter.setBrush(Qt::NoBrush);
             painter.drawEllipse(atom.pos, atom.radius + 4.0, atom.radius + 4.0);
             if (!atom.label.trimmed().isEmpty()) {
@@ -1065,7 +1273,7 @@ void StructureCanvas::paintEvent(QPaintEvent*) {
                 drawTextOutline(
                     atom.pos + QPointF(0.0, -atom.radius - 14.0),
                     atom.label,
-                    QColor("#2D7FF9"),
+                    previewAccent,
                     QColor("#FFFFFF"),
                     font);
             }
@@ -1170,7 +1378,7 @@ void StructureCanvas::paintEvent(QPaintEvent*) {
         } else if (m_interactionMode == InteractionMode::MoveAtoms) {
             footer = QStringLiteral("原子移動モード: 左ドラッグ=選択原子を移動   Ctrl+クリック/ドラッグ=重なりも選択   Esc=選択解除   右/中ドラッグ=パン   ホイール/ピンチ=ズーム   F=フィット");
         } else {
-            footer = QStringLiteral("視点モード: 左ドラッグ=回転   Ctrl+クリック/ドラッグ=重なりも選択   Esc=選択解除   Shift+左ドラッグ=選択原子を移動   右/中ドラッグ=パン   ホイール/ピンチ=ズーム   F=フィット");
+            footer = QStringLiteral("視点モード: 左ドラッグ=回転   Alt+左/右/中ドラッグ=パン   Ctrl+クリック/ドラッグ=重なりも選択   Esc=選択解除   Shift+左ドラッグ=選択原子を移動   ホイール/ピンチ=ズーム   F=フィット");
         }
     } else {
         if (m_interactionMode == InteractionMode::MoveModel) {
@@ -1178,7 +1386,7 @@ void StructureCanvas::paintEvent(QPaintEvent*) {
         } else if (m_interactionMode == InteractionMode::MoveAtoms) {
             footer = QStringLiteral("Move atoms mode: Left drag moves selected atoms   Ctrl+click/drag selects overlaps   Esc clears selection   Right/Middle drag pans   Wheel/pinch zooms   F fits");
         } else {
-            footer = QStringLiteral("Move view mode: Left drag rotates   Ctrl+click/drag selects overlaps   Esc clears selection   Shift+left drag moves selected atoms   Right/Middle drag pans   Wheel/pinch zooms   F fits");
+            footer = QStringLiteral("Move view mode: Left drag rotates   Alt+left/Right/Middle drag pans   Ctrl+click/drag selects overlaps   Esc clears selection   Shift+left drag moves selected atoms   Wheel/pinch zooms   F fits");
         }
     }
     painter.drawText(
@@ -1205,58 +1413,17 @@ void StructureCanvas::addAtomsInCtrlSelectionRect() {
     if (selection.isEmpty() || (selection.width() < 4 && selection.height() < 4)) {
         return;
     }
-    const QRectF selectionTarget = QRectF(selection).adjusted(-3.0, -3.0, 3.0, 3.0);
+    // Range selection follows the visible blue rectangle exactly.  Do not
+    // expand by atom radius/tolerance here: that made atoms just above the
+    // drawn rectangle get selected.
+    const QRectF selectionTarget = QRectF(selection);
 
-    const QRectF viewport = rect().adjusted(18, 18, -18, -18);
-    const QVector3D center = sceneCenter();
-    const double scale = sceneScale(viewport, center);
-    const double densityScale = atomRadiusDensityScale(
-        scale,
-        m_displayOptions.atomScale,
-        m_cachedNearestAtomDistance,
-        m_cachedMaxAtomRadius);
-    struct Candidate {
-        int atomId = -1;
-        double depth = 0.0;
-    };
-    std::vector<Candidate> candidates;
-    candidates.reserve(m_cachedAtomImages.size());
-    for (const auto& image : m_cachedAtomImages) {
-        if (image.atom < 0 || image.atom >= static_cast<int>(m_structure.atoms.size())) {
+    const std::vector<int> candidates = pickAtomsInScreenRect(selectionTarget);
+    for (int atomId : candidates) {
+        if (isAtomSelected(atomId)) {
             continue;
         }
-        const auto& atom = m_structure.atoms[static_cast<std::size_t>(image.atom)];
-        if (isAtomSelected(atom.atomId)) {
-            continue;
-        }
-        const QVector3D local = atom.cartesian + image.shift - center;
-        const auto rotated = rotatePoint(local);
-        const double perspective = depthPerspective(rotated.z());
-        const QPointF point = projectPoint(local, viewport, scale);
-        const double radius = hitAtomRadius(atom, scale, perspective, m_displayOptions.atomScale, densityScale);
-        const QRectF atomBounds(point.x() - radius, point.y() - radius, radius * 2.0, radius * 2.0);
-        if (!selectionTarget.contains(point) && !selectionTarget.intersects(atomBounds)) {
-            continue;
-        }
-        candidates.push_back({atom.atomId, rotated.z()});
-    }
-    std::sort(candidates.begin(), candidates.end(), [](const Candidate& a, const Candidate& b) {
-        if (std::abs(a.depth - b.depth) > 1.0e-9) {
-            return a.depth > b.depth;  // add near atoms first so focus lands on a visible target
-        }
-        return a.atomId < b.atomId;
-    });
-    std::vector<int> emittedAtomIds;
-    emittedAtomIds.reserve(candidates.size());
-    for (const auto& candidate : candidates) {
-        if (isAtomSelected(candidate.atomId)) {
-            continue;
-        }
-        if (std::find(emittedAtomIds.begin(), emittedAtomIds.end(), candidate.atomId) != emittedAtomIds.end()) {
-            continue;
-        }
-        emittedAtomIds.push_back(candidate.atomId);
-        emit atomActivated(candidate.atomId);
+        emit atomActivated(atomId);
     }
 }
 
@@ -1333,14 +1500,19 @@ void StructureCanvas::mouseMoveEvent(QMouseEvent* event) {
                 - m_viewUp * static_cast<float>(delta.y() / scale);
             emit selectedAtomsTranslated(worldDelta);
         }
+    } else if ((event->buttons() & Qt::LeftButton) && (event->modifiers() & Qt::AltModifier)) {
+        m_panOffset += QPointF(delta.x(), delta.y());
+        invalidatePickIndex();
     } else if (event->buttons() & Qt::LeftButton) {
         if (m_interactionMode == InteractionMode::View) {
             rotateBasisFromDrag(delta);
         } else if (m_interactionMode == InteractionMode::MoveModel) {
             m_panOffset += QPointF(delta.x(), delta.y());
+            invalidatePickIndex();
         }
     } else {
         m_panOffset += QPointF(delta.x(), delta.y());
+        invalidatePickIndex();
     }
     m_lastMousePos = event->pos();
     update();

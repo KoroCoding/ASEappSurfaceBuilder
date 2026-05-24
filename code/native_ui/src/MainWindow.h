@@ -44,6 +44,7 @@ private slots:
     void showStartupGuide();
     void showUsageHelp();
     void showAboutDialog();
+    void showAppSettingsDialog();
     void fitStructure();
     void resetView();
     void toggleLanguage();
@@ -224,6 +225,7 @@ private:
     QAction* m_depthCueAction = nullptr;
     QAction* m_helpAction = nullptr;
     QAction* m_aboutAction = nullptr;
+    QAction* m_settingsAction = nullptr;
     QAction* m_languageAction = nullptr;
     QAction* m_undoAction = nullptr;
     QAction* m_redoAction = nullptr;
@@ -280,4 +282,5 @@ private:
     bool m_moveModelMode = false;
     int m_activeDocumentIndex = -1;
     bool m_restoringDocument = false;
+    bool m_persistDisplayStartupSettings = true;
 };

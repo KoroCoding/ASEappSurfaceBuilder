@@ -1,5 +1,5 @@
 param(
-    [string]$Version = '1.3.2',
+    [string]$Version = '1.3.3',
     [string]$ZipPath = '',
     [string]$OutputExe = '',
     [string]$SignCertThumbprint = $env:ASEAPP_CODESIGN_THUMBPRINT,
@@ -86,6 +86,30 @@ function Sign-FirstPartyPayloadBinaries([string]$root) {
         ForEach-Object {
             Sign-IfNeeded $_.FullName
         }
+}
+
+function Copy-WindowsTrustSupportFiles([string]$root) {
+    $windowsToolsDir = Join-Path $PSScriptRoot 'tools\windows'
+    $supportFiles = @(
+        'ASEapp-Windows-Trust-LocalCertificate.ps1',
+        'README-Windows.txt'
+    )
+
+    New-Item -ItemType Directory -Path $root -Force | Out-Null
+    foreach ($supportFile in $supportFiles) {
+        $source = Join-Path $windowsToolsDir $supportFile
+        if (Test-Path -LiteralPath $source) {
+            Copy-Item -LiteralPath $source -Destination (Join-Path $root $supportFile) -Force
+        }
+    }
+
+    $certDestination = Join-Path $root 'ASEappSurfaceBuilderLocalCodeSigning.cer'
+    if ($signingCert) {
+        Export-Certificate -Cert $signingCert -FilePath $certDestination -Force | Out-Null
+    }
+    elseif (Test-Path -LiteralPath $certDestination) {
+        Remove-Item -LiteralPath $certDestination -Force
+    }
 }
 
 if (-not ('AseappFnv1a64' -as [type])) {
@@ -228,6 +252,7 @@ try {
     Expand-Archive -LiteralPath $zipPath -DestinationPath $payloadRoot -Force
     $binDir = Join-Path $payloadRoot 'bin'
     Copy-RuntimeDlls $binDir
+    Copy-WindowsTrustSupportFiles $payloadRoot
     Sign-FirstPartyPayloadBinaries $payloadRoot
     Write-PayloadManifest $payloadRoot
 
@@ -311,6 +336,7 @@ target_link_libraries(aseapp_launcher PRIVATE Shell32 User32 Gdi32)
 
     Copy-Item -LiteralPath $builtLauncher -Destination $outputExe -Force
     Sign-IfNeeded $outputExe
+    Copy-WindowsTrustSupportFiles $outputDir
     Write-Host "Created: $outputExe"
 }
 finally {

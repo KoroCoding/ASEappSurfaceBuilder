@@ -13,11 +13,13 @@ v1.3.2 は、原子種ペアごとのボンド表示最大距離編集と macOS 
 - この画面では原子座標を変更せず、表示するボンドの最大距離だけを更新します。
 - 元素ペアの表示順は、アルファベット順ではなく構造内に現れた原子種順に揃えました。
 - macOS でも MainWindow が表示されるまで起動スプラッシュを表示します。
+- Windows ローカル自己署名版向けに、公開証明書、信頼登録 PowerShell、Windows 向け README を配布物へ同梱するようにしました。
 
 ## 配布物
 
 - Windows 単体 launcher: `ASEappSurfaceBuilder-1.3.2-Windows.exe`
 - Windows ZIP 展開版: `ASEappSurfaceBuilder-1.3.2-Windows.zip`
+- Windows 自己署名信頼補助: `ASEappSurfaceBuilderLocalCodeSigning.cer` / `ASEapp-Windows-Trust-LocalCertificate.ps1` / `README-Windows.txt`
 - macOS DMG: `ASEappSurfaceBuilder-1.3.2-macOS.dmg`
 
 ## 検証

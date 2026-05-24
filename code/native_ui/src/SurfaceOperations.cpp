@@ -92,28 +92,41 @@ void fitOrVacuumAxis(StructureData& data, int axisIndex, double vacuumAngstrom, 
     }
 
     const float slabSpan = std::max(0.1f, maxProj - minProj);
-    const float vacuum = static_cast<float>(std::max(0.0, vacuumAngstrom));
-    const float newLength = std::max(0.1f, slabSpan + vacuum);
-    const float freeSpace = std::max(0.0f, newLength - slabSpan);
+    const float requestedVacuum = static_cast<float>(std::max(0.0, vacuumAngstrom));
+    const float oldLength = std::max(0.1f, data.cellVectors[static_cast<std::size_t>(idx)].length());
 
+    float newLength = slabSpan;
     float targetMin = 0.0f;
-    switch (placementMode) {
-    case 1:  // centered
-        targetMin = freeSpace * 0.5f;
-        break;
-    case 2:  // negative side
-        targetMin = freeSpace;
-        break;
-    case 3: {  // custom slab-center fraction in the new cell
-        const float fraction = static_cast<float>(std::clamp(customCenterFraction, 0.0, 1.0));
-        targetMin = fraction * newLength - slabSpan * 0.5f;
-        targetMin = std::clamp(targetMin, 0.0f, freeSpace);
-        break;
-    }
-    case 0:  // positive side
-    default:
+    if (requestedVacuum <= 1.0e-6f) {
+        // Fit tight / remove vacuum: keep the previous behavior and collapse
+        // the chosen axis to the slab span.
+        newLength = std::max(0.1f, slabSpan);
         targetMin = 0.0f;
-        break;
+    } else {
+        // Add vacuum incrementally.  The previous implementation rebuilt the
+        // cell as slabSpan + requestedVacuum, which replaced any existing
+        // vacuum on the opposite side.  Preserve the current slab offset and
+        // grow the cell length instead.
+        newLength = std::max(0.1f, std::max(oldLength, slabSpan) + requestedVacuum);
+        const float freeSpace = std::max(0.0f, newLength - slabSpan);
+        switch (placementMode) {
+        case 1:  // centered
+            targetMin = minProj + requestedVacuum * 0.5f;
+            break;
+        case 2:  // negative side
+            targetMin = minProj + requestedVacuum;
+            break;
+        case 3: {  // custom slab-center fraction in the new cell
+            const float fraction = static_cast<float>(std::clamp(customCenterFraction, 0.0, 1.0));
+            targetMin = fraction * newLength - slabSpan * 0.5f;
+            break;
+        }
+        case 0:  // positive side
+        default:
+            targetMin = minProj;
+            break;
+        }
+        targetMin = std::clamp(targetMin, 0.0f, freeSpace);
     }
 
     const QVector3D shift = axis * (targetMin - minProj);

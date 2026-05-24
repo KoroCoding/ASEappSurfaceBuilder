@@ -87,6 +87,13 @@ private:
         QVector3D shift;
     };
 
+    struct PickIndexEntry {
+        int atomId = -1;
+        QPointF point;
+        double radius = 0.0;
+        double depth = 0.0;
+    };
+
     QVector3D rotatePoint(const QVector3D& point) const;
     QPointF projectPoint(const QVector3D& point, const QRectF& rect, double scale) const;
     std::vector<BondSegment> buildBondPairs() const;
@@ -94,6 +101,9 @@ private:
     int pickAtomAt(const QPoint& pos) const;
     std::vector<int> pickAtomsAt(const QPoint& pos) const;
     int pickNextCtrlAtomAt(const QPoint& pos) const;
+    void invalidatePickIndex() const;
+    void rebuildPickIndex() const;
+    std::vector<int> pickAtomsInScreenRect(const QRectF& selection) const;
     QVector3D sceneCenter() const;
     double sceneScale(const QRectF& viewport, const QVector3D& center) const;
     void rebuildSceneCache();
@@ -114,6 +124,10 @@ private:
     InteractionMode m_interactionMode = InteractionMode::View;
     std::vector<BondSegment> m_cachedBonds;
     std::vector<AtomImage> m_cachedAtomImages;
+    mutable std::vector<PickIndexEntry> m_pickIndexEntries;
+    mutable QHash<qint64, std::vector<int>> m_pickIndexGrid;
+    mutable bool m_pickIndexDirty = true;
+    mutable QSize m_pickIndexCanvasSize;
     QVector3D m_cachedCenter;
     double m_cachedRadius = 1.0;
     double m_cachedNearestAtomDistance = 0.0;

@@ -6,7 +6,9 @@ ASEapp Surface Builder
 起動方法
 --------
 - 単体 launcher 版を使う場合:
-  ASEappSurfaceBuilder-1.3.2-Windows.exe を実行します。
+  ASEappSurfaceBuilder-1.3.3-Windows.exe を実行します。
+  発行元確認の警告が出る場合は、同じフォルダの README-Windows.txt を確認し、
+  配布元を信頼できる場合だけ ASEapp-Windows-Trust-LocalCertificate.ps1 を実行します。
 
 - ZIP 展開版を使う場合:
   bin\ASEappNativeUI.exe を実行します。
@@ -67,6 +69,7 @@ Ctrl+W: 現在の構造タブを閉じる
 - Qt ランタイムと Windows の VC++ ランタイム DLL は配布物に同梱済みです。
 - DLL 不足エラーが出る場合は、bin 内の exe だけを単独で移動していないか確認してください。
 - "no Qt platform plugin could be initialized" が出る場合は古い配布物や bin だけの移動が原因です。単体 launcher 版を使うか、ZIP 全体を展開してください。
+- Windows の自己署名版では初回起動時に発行元確認や SmartScreen 警告が出る場合があります。警告を減らしたい場合は README-Windows.txt を確認してください。完全に警告なしの配布には Microsoft Trusted Signing や OV/EV などの信頼済みコード署名が必要です。
 - macOS の自己署名版では初回起動時に Gatekeeper の警告が出る場合があります。警告なしの配布には Developer ID + Notarization が必要です。
 
 詳しくは QUICKSTART.txt と CHANGELOG.txt も確認してください。

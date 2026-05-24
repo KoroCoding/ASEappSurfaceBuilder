@@ -2,7 +2,7 @@ cmake_minimum_required(VERSION 3.21)
 if(POLICY CMP0091)
   cmake_policy(SET CMP0091 NEW)
 endif()
-project(aseapp_native_ui VERSION 1.3.2 LANGUAGES CXX)
+project(aseapp_native_ui VERSION 1.3.3 LANGUAGES CXX)
 
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -67,6 +67,7 @@ set(ASEAPP_NATIVE_UI_COMMON_SOURCES
   src/StructureFileLoader.h
   src/StructureData.h
   ${CMAKE_CURRENT_BINARY_DIR}/app_icons.qrc
+  src/app_settings.qrc
 )
 
 add_executable(aseapp_native_ui
@@ -236,6 +237,18 @@ if(APPLE)
   )
 endif()
 
+if(WIN32)
+  set(ASEAPP_WINDOWS_PUBLIC_CERT "${CMAKE_CURRENT_SOURCE_DIR}/certs/ASEappSurfaceBuilderLocalCodeSigning.cer")
+  if(EXISTS "${ASEAPP_WINDOWS_PUBLIC_CERT}")
+    install(FILES "${ASEAPP_WINDOWS_PUBLIC_CERT}" DESTINATION .)
+  endif()
+  install(FILES
+    tools/windows/ASEapp-Windows-Trust-LocalCertificate.ps1
+    tools/windows/README-Windows.txt
+    DESTINATION .
+  )
+endif()
+
 set(ASEAPP_DEPLOY_TOOL_OPTIONS)
 if(APPLE)
   list(APPEND ASEAPP_DEPLOY_TOOL_OPTIONS -no-codesign)
@@ -390,9 +403,10 @@ if(WIN32)
     list(APPEND ASEAPP_QT_RUNTIME_SEARCH_DIRS "${ASEAPP_CONDA_RUNTIME_BIN}")
   endif()
   foreach(ASEAPP_PREFIX IN LISTS CMAKE_PREFIX_PATH)
+    file(TO_CMAKE_PATH "${ASEAPP_PREFIX}" ASEAPP_PREFIX_CMAKE)
     list(APPEND ASEAPP_QT_RUNTIME_SEARCH_DIRS
-      "${ASEAPP_PREFIX}/bin"
-      "${ASEAPP_PREFIX}/Library/bin"
+      "${ASEAPP_PREFIX_CMAKE}/bin"
+      "${ASEAPP_PREFIX_CMAKE}/Library/bin"
     )
   endforeach()
   list(REMOVE_DUPLICATES ASEAPP_QT_RUNTIME_SEARCH_DIRS)
@@ -400,7 +414,7 @@ if(WIN32)
     unset(ASEAPP_QT_RUNTIME_PATH)
     foreach(ASEAPP_QT_RUNTIME_DIR IN LISTS ASEAPP_QT_RUNTIME_SEARCH_DIRS)
       if(EXISTS "${ASEAPP_QT_RUNTIME_DIR}/${ASEAPP_QT_RUNTIME_DLL}")
-        set(ASEAPP_QT_RUNTIME_PATH "${ASEAPP_QT_RUNTIME_DIR}/${ASEAPP_QT_RUNTIME_DLL}")
+        file(TO_CMAKE_PATH "${ASEAPP_QT_RUNTIME_DIR}/${ASEAPP_QT_RUNTIME_DLL}" ASEAPP_QT_RUNTIME_PATH)
         break()
       endif()
     endforeach()

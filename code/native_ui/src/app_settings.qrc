@@ -1,0 +1,5 @@
+﻿<RCC>
+  <qresource prefix="/settings">
+    <file alias="default_app_settings.json">../assets/default_app_settings.json</file>
+  </qresource>
+</RCC>
