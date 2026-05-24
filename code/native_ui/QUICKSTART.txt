@@ -79,3 +79,14 @@ ASEapp Surface Builder クイックスタート
 - POSCAR は Direct / Cartesian、通常 XYZ は Cartesian / 分率座標を選択できます。
 - 重要な構造は、編集前に別名保存しておくと安全です。
 - 原子一覧PNGは、横プレビュー、Prefix/Suffix、表示順リストを確認してから保存します。
+
+UMA relaxation
+--------------
+- Open Settings > App settings > UMA.
+- Set the Python command, for example:
+  python
+  conda run -n uma_proj python
+  C:\path\to\python.exe
+- Set the UMA checkpoint path, task name (default: oc20), device, fmax, and max steps.
+- Run Structure > UMA relaxation, or use the UMA relaxation button in the Supercell/Vacuum panel.
+- The current structure is exported to a temporary extXYZ file, relaxed by ASE/fairchem/UMA in a separate Python process, then loaded back into the canvas.

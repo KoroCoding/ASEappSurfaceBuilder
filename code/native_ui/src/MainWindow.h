@@ -69,6 +69,7 @@ private slots:
     void redoEdit();
     void showMeasurementReport();
     void showStructureCheckReport();
+    void optimizeStructureWithUma();
     void saveSelectedPrecursorCsv();
     void loadPrecursorCsv();
     void placeLoadedPrecursor();
@@ -215,6 +216,7 @@ private:
     QAction* m_vacuumAction = nullptr;
     QAction* m_removeVacuumAction = nullptr;
     QAction* m_axisTiltAction = nullptr;
+    QAction* m_umaOptimizeAction = nullptr;
     QAction* m_showCellAction = nullptr;
     QAction* m_showBondsAction = nullptr;
     QAction* m_showOutsideCellAction = nullptr;

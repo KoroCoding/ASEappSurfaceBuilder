@@ -241,3 +241,15 @@ ctest --test-dir code/native_ui/build -C Debug --output-on-failure
 ## ライセンス・引用
 
 ライセンスファイルを追加する場合は、この節に明記してください。論文・発表で利用する場合は、使用したバージョン、入力構造、出力形式、追加した前駆体/吸着分子条件を記録しておくことを推奨します。
+
+## UMA relaxation
+
+ASEapp can launch UMA through an external Python environment instead of bundling the PyTorch/fairchem runtime into the Qt executable.
+
+1. Open **Settings > App settings > UMA**.
+2. Set the Python command, for example `python`, `conda run -n uma_proj python`, or a full `python.exe` path.
+3. Set the UMA checkpoint path, task name such as `oc20`, device, `fmax`, and maximum steps.
+4. Choose **Structure > UMA relaxation** or the **UMA relaxation** button in the Supercell/Vacuum panel.
+5. ASEapp writes the current structure to a temporary extXYZ file, runs `tools/uma_relax_worker.py`, and redraws the optimized result when the worker succeeds.
+
+The model checkpoint is intentionally stored as an app setting/JSON value and is not embedded in the executable. Large checkpoints such as `uma-m-1p1.pt` should stay outside Git unless a dedicated UMA package is intentionally created.

@@ -12,6 +12,7 @@
 #include <QCheckBox>
 #include <QColor>
 #include <QComboBox>
+#include <QCoreApplication>
 #include <QDesktopServices>
 #include <QDialog>
 #include <QDialogButtonBox>
@@ -49,6 +50,8 @@
 #include <QPaintEvent>
 #include <QPen>
 #include <QPixmap>
+#include <QProcess>
+#include <QProgressDialog>
 #include <QPushButton>
 #include <QQuaternion>
 #include <QRadialGradient>
@@ -65,6 +68,7 @@
 #include <QStatusBar>
 #include <QStandardPaths>
 #include <QTabWidget>
+#include <QTemporaryDir>
 #include <QTextStream>
 #include <QToolBar>
 #include <QIcon>
@@ -1204,6 +1208,86 @@ bool appBoolSetting(const QStringList& path, bool fallback) {
 
 double appDoubleSetting(const QStringList& path, double fallback) {
     return appSettingValue(path, fallback).toDouble(fallback);
+}
+
+int appIntSetting(const QStringList& path, int fallback) {
+    return appSettingValue(path, fallback).toInt(fallback);
+}
+
+QString appStringSetting(const QStringList& path, const QString& fallback) {
+    return appSettingValue(path, fallback).toString(fallback);
+}
+
+QString umaWorkerScriptPath() {
+    const QDir appDir(QCoreApplication::applicationDirPath());
+    const QStringList candidates = {
+        appDir.absoluteFilePath(QStringLiteral("../tools/uma_relax_worker.py")),
+        appDir.absoluteFilePath(QStringLiteral("tools/uma_relax_worker.py")),
+        appDir.absoluteFilePath(QStringLiteral("../../tools/uma_relax_worker.py")),
+        appDir.absoluteFilePath(QStringLiteral("../../../tools/uma_relax_worker.py")),
+    };
+    for (const QString& candidate : candidates) {
+        const QFileInfo info(candidate);
+        if (info.exists() && info.isFile()) {
+            return info.absoluteFilePath();
+        }
+    }
+    return candidates.front();
+}
+
+QString readUtf8TextFile(const QString& path) {
+    QFile file(path);
+    if (!file.open(QIODevice::ReadOnly | QIODevice::Text)) {
+        return {};
+    }
+    return QString::fromUtf8(file.readAll());
+}
+
+QString lastTextLines(const QString& text, int maxLines = 20) {
+    const QStringList lines = text.split(QRegularExpression(QStringLiteral("\r?\n")), Qt::SkipEmptyParts);
+    if (lines.size() <= maxLines) {
+        return lines.join(QStringLiteral("\n"));
+    }
+    return lines.mid(lines.size() - maxLines).join(QStringLiteral("\n"));
+}
+
+bool writeUmaConstraintFile(const StructureData& structure, const QString& path, QString* errorMessage) {
+    QJsonArray fixedAtomIndices;
+    QJsonArray movableAxes;
+    for (std::size_t index = 0; index < structure.atoms.size(); ++index) {
+        const NativeAtom& atom = structure.atoms[index];
+        QJsonArray axes;
+        bool fullyMovable = true;
+        for (bool movable : atom.movable) {
+            axes.append(movable);
+            fullyMovable = fullyMovable && movable;
+        }
+        if (!fullyMovable) {
+            fixedAtomIndices.append(static_cast<int>(index));
+        }
+        movableAxes.append(axes);
+    }
+
+    QJsonObject root;
+    root.insert(QStringLiteral("schemaVersion"), 1);
+    root.insert(QStringLiteral("fixAtomIndices"), fixedAtomIndices);
+    root.insert(QStringLiteral("movableAxes"), movableAxes);
+
+    QSaveFile file(path);
+    if (!file.open(QIODevice::WriteOnly | QIODevice::Truncate)) {
+        if (errorMessage != nullptr) {
+            *errorMessage = QStringLiteral("Failed to write UMA constraints: %1").arg(path);
+        }
+        return false;
+    }
+    file.write(QJsonDocument(root).toJson(QJsonDocument::Indented));
+    if (!file.commit()) {
+        if (errorMessage != nullptr) {
+            *errorMessage = QStringLiteral("Failed to commit UMA constraints: %1").arg(path);
+        }
+        return false;
+    }
+    return true;
 }
 
 bool displayStartupSetting(const QString& key, bool fallback) {
@@ -3084,6 +3168,7 @@ QString MainWindow::uiText(const QString& key) const {
         if (key == "vacuum") return QStringLiteral("真空層");
         if (key == "remove_vacuum") return QStringLiteral("真空層除去");
         if (key == "axis_tilt") return QStringLiteral("セル軸傾き");
+        if (key == "uma_optimize") return QStringLiteral("UMA構造最適化");
         if (key == "language") return QStringLiteral("Language: English");
         if (key == "placement_group") return QStringLiteral("1. 原子配置");
         if (key == "pose_group") return QStringLiteral("2. 吸着分子ポーズ編集");
@@ -3145,6 +3230,7 @@ QString MainWindow::uiText(const QString& key) const {
         if (key == "vacuum_tip") return QStringLiteral("真空層をÅ単位で追加/除去し、スラブ全体をa/b/c方向へ移動します。");
         if (key == "remove_vacuum_tip") return QStringLiteral("c軸方向の余分な真空層をなくし、原子範囲にセルを合わせます。");
         if (key == "axis_tilt_tip") return QStringLiteral("セル軸そのものを指定方向へ傾けます。c軸をa/b方向へ傾けるとステップテラス候補を作りやすくなります。");
+        if (key == "uma_optimize_tip") return QStringLiteral("設定JSONのUMA重みファイル・task・deviceを使い、外部Python環境で構造最適化して結果を再描画します。");
         if (key == "export_legend_tip") return QStringLiteral("現在の構造に含まれる元素を、発表用の球＋ラベルPNGとして解像度/DPIを選んで出力します。");
         if (key == "periodic_table") return QStringLiteral("周期表...");
         if (key == "periodic_table_tip") return QStringLiteral("小型カードの周期表から生成元素を選択します。詳細は元素にカーソルを合わせると表示します。");
@@ -3177,6 +3263,7 @@ QString MainWindow::uiText(const QString& key) const {
         if (key == "vacuum") return QStringLiteral("Vacuum");
         if (key == "remove_vacuum") return QStringLiteral("Remove vacuum");
         if (key == "axis_tilt") return QStringLiteral("Axis tilt");
+        if (key == "uma_optimize") return QStringLiteral("UMA relaxation");
         if (key == "language") return QStringLiteral("Language: 日本語");
         if (key == "placement_group") return QStringLiteral("1. Atom placement");
         if (key == "pose_group") return QStringLiteral("2. Adsorbate pose editor");
@@ -3238,6 +3325,7 @@ QString MainWindow::uiText(const QString& key) const {
         if (key == "vacuum_tip") return QStringLiteral("Add/remove vacuum in Å and translate the whole slab along a/b/c.");
         if (key == "remove_vacuum_tip") return QStringLiteral("Remove extra vacuum along the c-axis and fit the cell to the atom bounds.");
         if (key == "axis_tilt_tip") return QStringLiteral("Tilt a cell axis toward another lattice direction. Tilting c toward a/b helps create step-terrace candidates.");
+        if (key == "uma_optimize_tip") return QStringLiteral("Relax the current structure with UMA in an external Python environment, using the configured checkpoint, task, and device, then render the result.");
         if (key == "export_legend_tip") return QStringLiteral("Export elements in the current structure as a publication-ready sphere-and-label PNG with selectable resolution and DPI.");
         if (key == "periodic_table") return QStringLiteral("Periodic table...");
         if (key == "periodic_table_tip") return QStringLiteral("Choose the placement element from a compact periodic table. Hover an element for details.");
@@ -3625,11 +3713,15 @@ void MainWindow::buildUi() {
     auto* axisTiltButton = new QPushButton(uiText(QStringLiteral("axis_tilt")), surfaceGroup);
     axisTiltButton->setToolTip(uiText(QStringLiteral("axis_tilt_tip")));
     connect(axisTiltButton, &QPushButton::clicked, this, &MainWindow::tiltCellAxis);
+    auto* umaOptimizeButton = new QPushButton(uiText(QStringLiteral("uma_optimize")), surfaceGroup);
+    umaOptimizeButton->setToolTip(uiText(QStringLiteral("uma_optimize_tip")));
+    connect(umaOptimizeButton, &QPushButton::clicked, this, &MainWindow::optimizeStructureWithUma);
     surfaceLayout->addWidget(m_supercellStatusLabel);
     surfaceLayout->addWidget(supercellButton);
     surfaceLayout->addWidget(vacuumButton);
     surfaceLayout->addWidget(removeVacuumButton);
     surfaceLayout->addWidget(axisTiltButton);
+    surfaceLayout->addWidget(umaOptimizeButton);
     rightLayout->addWidget(surfaceGroup);
     makeCollapsibleGroup(surfaceGroup, QStringLiteral("surface"), true);
 
@@ -3879,6 +3971,10 @@ void MainWindow::buildUi() {
     m_axisTiltAction->setToolTip(uiText(QStringLiteral("axis_tilt_tip")));
     connect(m_axisTiltAction, &QAction::triggered, this, &MainWindow::tiltCellAxis);
     toolbar->addAction(m_axisTiltAction);
+    m_umaOptimizeAction = new QAction(uiText(QStringLiteral("uma_optimize")), this);
+    m_umaOptimizeAction->setShortcut(QKeySequence("Ctrl+Alt+U"));
+    m_umaOptimizeAction->setToolTip(uiText(QStringLiteral("uma_optimize_tip")));
+    connect(m_umaOptimizeAction, &QAction::triggered, this, &MainWindow::optimizeStructureWithUma);
     m_showCellAction = toolbar->addAction(uiText(QStringLiteral("cell"))); m_showCellAction->setCheckable(true); m_showCellAction->setChecked(m_showCellCheck != nullptr ? m_showCellCheck->isChecked() : true);
     m_showCellAction->setToolTip("Show or hide the unit-cell frame.");
     connect(m_showCellAction, &QAction::toggled, m_showCellCheck, &QCheckBox::setChecked);
@@ -3941,6 +4037,7 @@ void MainWindow::buildUi() {
     structureMenu->addAction(m_removeVacuumAction);
     structureMenu->addAction(m_axisTiltAction);
     structureMenu->addAction(m_terminateAction);
+    structureMenu->addAction(m_umaOptimizeAction);
     structureMenu->addSeparator();
     auto* structureCheckAction = structureMenu->addAction(m_japanese ? QStringLiteral("構造チェック") : QStringLiteral("Structure check"));
     connect(structureCheckAction, &QAction::triggered, this, &MainWindow::showStructureCheckReport);
@@ -4510,6 +4607,82 @@ void MainWindow::showAppSettingsDialog() {
     }
     groupsLayout->addStretch(1);
     tabs->addTab(groupsPage, m_japanese ? QStringLiteral("右パネル") : QStringLiteral("Right panel"));
+
+    auto* umaPage = new QWidget(tabs);
+    auto* umaLayout = new QVBoxLayout(umaPage);
+    auto* umaInfo = new QLabel(
+        m_japanese
+            ? QStringLiteral("UMAは外部Python環境で実行します。重みファイルはEXEに埋め込まず、ここで指定したパスを使います。")
+            : QStringLiteral("UMA runs in an external Python environment. The model checkpoint is not embedded in the EXE; the path below is used."),
+        umaPage);
+    umaInfo->setWordWrap(true);
+    umaLayout->addWidget(umaInfo);
+
+    auto* umaForm = new QFormLayout();
+    auto* umaModelPathEdit = new QLineEdit(appStringSetting({QStringLiteral("uma"), QStringLiteral("modelPath")}, QString()), umaPage);
+    auto* umaModelBrowseButton = new QPushButton(m_japanese ? QStringLiteral("参照...") : QStringLiteral("Browse..."), umaPage);
+    auto* umaModelRow = new QHBoxLayout();
+    umaModelRow->addWidget(umaModelPathEdit, 1);
+    umaModelRow->addWidget(umaModelBrowseButton);
+    connect(umaModelBrowseButton, &QPushButton::clicked, &dialog, [&]() {
+        const QString selected = QFileDialog::getOpenFileName(
+            &dialog,
+            m_japanese ? QStringLiteral("UMA重みファイルを選択") : QStringLiteral("Select UMA checkpoint"),
+            umaModelPathEdit->text().trimmed().isEmpty() ? QDir::homePath() : QFileInfo(umaModelPathEdit->text()).absolutePath(),
+            m_japanese ? QStringLiteral("PyTorch checkpoint (*.pt *.pth);;All files (*.*)") : QStringLiteral("PyTorch checkpoint (*.pt *.pth);;All files (*.*)"));
+        if (!selected.isEmpty()) {
+            umaModelPathEdit->setText(QDir::toNativeSeparators(selected));
+        }
+    });
+    umaForm->addRow(m_japanese ? QStringLiteral("重みファイル") : QStringLiteral("Model checkpoint"), umaModelRow);
+
+    auto* umaPythonCommandEdit = new QLineEdit(appStringSetting({QStringLiteral("uma"), QStringLiteral("pythonCommand")}, QStringLiteral("python")), umaPage);
+    umaPythonCommandEdit->setToolTip(m_japanese
+        ? QStringLiteral("例: python / conda run -n uma_proj python / C:\\path\\to\\python.exe")
+        : QStringLiteral("Examples: python / conda run -n uma_proj python / C:\\path\\to\\python.exe"));
+    umaForm->addRow(m_japanese ? QStringLiteral("Pythonコマンド") : QStringLiteral("Python command"), umaPythonCommandEdit);
+
+    auto* umaTaskCombo = new QComboBox(umaPage);
+    umaTaskCombo->setEditable(true);
+    umaTaskCombo->addItems({QStringLiteral("oc20"), QStringLiteral("omat"), QStringLiteral("omol"), QStringLiteral("odac"), QStringLiteral("omc")});
+    const QString umaTask = appStringSetting({QStringLiteral("uma"), QStringLiteral("taskName")}, QStringLiteral("oc20"));
+    if (umaTaskCombo->findText(umaTask) < 0) {
+        umaTaskCombo->addItem(umaTask);
+    }
+    umaTaskCombo->setCurrentText(umaTask);
+    umaForm->addRow(m_japanese ? QStringLiteral("task") : QStringLiteral("Task"), umaTaskCombo);
+
+    auto* umaDeviceCombo = new QComboBox(umaPage);
+    umaDeviceCombo->setEditable(true);
+    umaDeviceCombo->addItems({QStringLiteral("cuda"), QStringLiteral("cpu"), QStringLiteral("auto")});
+    const QString umaDevice = appStringSetting({QStringLiteral("uma"), QStringLiteral("device")}, QStringLiteral("cuda"));
+    if (umaDeviceCombo->findText(umaDevice) < 0) {
+        umaDeviceCombo->addItem(umaDevice);
+    }
+    umaDeviceCombo->setCurrentText(umaDevice);
+    umaForm->addRow(m_japanese ? QStringLiteral("device") : QStringLiteral("Device"), umaDeviceCombo);
+
+    auto* umaFmaxSpin = new QDoubleSpinBox(umaPage);
+    umaFmaxSpin->setRange(0.001, 10.0);
+    umaFmaxSpin->setDecimals(4);
+    umaFmaxSpin->setSingleStep(0.01);
+    umaFmaxSpin->setSuffix(QStringLiteral(" eV/Å"));
+    umaFmaxSpin->setValue(appDoubleSetting({QStringLiteral("uma"), QStringLiteral("fmax")}, 0.05));
+    umaForm->addRow(QStringLiteral("fmax"), umaFmaxSpin);
+
+    auto* umaMaxStepsSpin = new QSpinBox(umaPage);
+    umaMaxStepsSpin->setRange(1, 100000);
+    umaMaxStepsSpin->setValue(appIntSetting({QStringLiteral("uma"), QStringLiteral("maxSteps")}, 500));
+    umaForm->addRow(m_japanese ? QStringLiteral("最大ステップ") : QStringLiteral("Max steps"), umaMaxStepsSpin);
+
+    auto* umaFixSelectiveCheck = new QCheckBox(
+        m_japanese ? QStringLiteral("Selective dynamics の固定原子をUMA最適化でも固定する") : QStringLiteral("Keep selective-dynamics fixed atoms fixed during UMA relaxation"),
+        umaPage);
+    umaFixSelectiveCheck->setChecked(appBoolSetting({QStringLiteral("uma"), QStringLiteral("fixSelectiveAtoms")}, true));
+    umaLayout->addLayout(umaForm);
+    umaLayout->addWidget(umaFixSelectiveCheck);
+    umaLayout->addStretch(1);
+    tabs->addTab(umaPage, QStringLiteral("UMA"));
     layout->addWidget(tabs, 1);
 
     auto* buttons = new QDialogButtonBox(QDialogButtonBox::Ok | QDialogButtonBox::Cancel | QDialogButtonBox::RestoreDefaults, &dialog);
@@ -4534,6 +4707,14 @@ void MainWindow::showAppSettingsDialog() {
                 .value(QStringLiteral("groups")).toObject()
                 .value(it.key()).toBool(fallback));
         }
+        const QJsonObject umaDefaults = defaults.value(QStringLiteral("uma")).toObject();
+        umaModelPathEdit->setText(umaDefaults.value(QStringLiteral("modelPath")).toString());
+        umaPythonCommandEdit->setText(umaDefaults.value(QStringLiteral("pythonCommand")).toString(QStringLiteral("python")));
+        umaTaskCombo->setCurrentText(umaDefaults.value(QStringLiteral("taskName")).toString(QStringLiteral("oc20")));
+        umaDeviceCombo->setCurrentText(umaDefaults.value(QStringLiteral("device")).toString(QStringLiteral("cuda")));
+        umaFmaxSpin->setValue(umaDefaults.value(QStringLiteral("fmax")).toDouble(0.05));
+        umaMaxStepsSpin->setValue(umaDefaults.value(QStringLiteral("maxSteps")).toInt(500));
+        umaFixSelectiveCheck->setChecked(umaDefaults.value(QStringLiteral("fixSelectiveAtoms")).toBool(true));
     });
     connect(buttons, &QDialogButtonBox::accepted, &dialog, &QDialog::accept);
     connect(buttons, &QDialogButtonBox::rejected, &dialog, &QDialog::reject);
@@ -4567,9 +4748,245 @@ void MainWindow::showAppSettingsDialog() {
             }
         }
     }
+    setAppSettingValue({QStringLiteral("uma"), QStringLiteral("modelPath")}, umaModelPathEdit->text().trimmed());
+    setAppSettingValue({QStringLiteral("uma"), QStringLiteral("pythonCommand")}, umaPythonCommandEdit->text().trimmed().isEmpty() ? QStringLiteral("python") : umaPythonCommandEdit->text().trimmed());
+    setAppSettingValue({QStringLiteral("uma"), QStringLiteral("taskName")}, umaTaskCombo->currentText().trimmed().isEmpty() ? QStringLiteral("oc20") : umaTaskCombo->currentText().trimmed());
+    setAppSettingValue({QStringLiteral("uma"), QStringLiteral("device")}, umaDeviceCombo->currentText().trimmed().isEmpty() ? QStringLiteral("cuda") : umaDeviceCombo->currentText().trimmed());
+    setAppSettingValue({QStringLiteral("uma"), QStringLiteral("fmax")}, umaFmaxSpin->value());
+    setAppSettingValue({QStringLiteral("uma"), QStringLiteral("maxSteps")}, umaMaxStepsSpin->value());
+    setAppSettingValue({QStringLiteral("uma"), QStringLiteral("fixSelectiveAtoms")}, umaFixSelectiveCheck->isChecked());
     statusBar()->showMessage(
         m_japanese ? QStringLiteral("アプリ設定を保存しました。") : QStringLiteral("App settings saved."),
         3500);
+}
+
+void MainWindow::optimizeStructureWithUma() {
+    if (m_structure.atoms.empty()) {
+        QMessageBox::information(
+            this,
+            m_japanese ? QStringLiteral("UMA構造最適化") : QStringLiteral("UMA relaxation"),
+            m_japanese ? QStringLiteral("最適化する構造がありません。") : QStringLiteral("No structure is loaded."));
+        return;
+    }
+
+    const QString modelPathSetting = appStringSetting({QStringLiteral("uma"), QStringLiteral("modelPath")}, QString()).trimmed();
+    if (modelPathSetting.isEmpty()) {
+        QMessageBox::warning(
+            this,
+            m_japanese ? QStringLiteral("UMA設定が必要です") : QStringLiteral("UMA settings required"),
+            m_japanese
+                ? QStringLiteral("設定 > アプリ設定 > UMA で重みファイルを指定してください。")
+                : QStringLiteral("Set the model checkpoint under Settings > App settings > UMA."));
+        showAppSettingsDialog();
+        return;
+    }
+
+    QFileInfo modelInfo(modelPathSetting);
+    if (modelInfo.isRelative()) {
+        modelInfo = QFileInfo(QDir(QCoreApplication::applicationDirPath()).absoluteFilePath(modelPathSetting));
+    }
+    if (!modelInfo.exists() || !modelInfo.isFile()) {
+        QMessageBox::warning(
+            this,
+            m_japanese ? QStringLiteral("UMA重みファイルが見つかりません") : QStringLiteral("UMA checkpoint not found"),
+            m_japanese
+                ? QStringLiteral("指定された重みファイルが見つかりません:\n%1").arg(modelInfo.absoluteFilePath())
+                : QStringLiteral("The configured checkpoint was not found:\n%1").arg(modelInfo.absoluteFilePath()));
+        showAppSettingsDialog();
+        return;
+    }
+
+    const QString workerPath = umaWorkerScriptPath();
+    if (!QFileInfo::exists(workerPath)) {
+        QMessageBox::critical(
+            this,
+            m_japanese ? QStringLiteral("UMA workerが見つかりません") : QStringLiteral("UMA worker not found"),
+            m_japanese
+                ? QStringLiteral("UMA実行用Pythonスクリプトが見つかりません:\n%1").arg(workerPath)
+                : QStringLiteral("The UMA worker script was not found:\n%1").arg(workerPath));
+        return;
+    }
+
+    const QString pythonCommand = appStringSetting({QStringLiteral("uma"), QStringLiteral("pythonCommand")}, QStringLiteral("python")).trimmed();
+    QStringList commandParts = QProcess::splitCommand(pythonCommand.isEmpty() ? QStringLiteral("python") : pythonCommand);
+    if (commandParts.isEmpty()) {
+        QMessageBox::warning(
+            this,
+            m_japanese ? QStringLiteral("Pythonコマンドが空です") : QStringLiteral("Empty Python command"),
+            m_japanese
+                ? QStringLiteral("設定 > アプリ設定 > UMA で Python コマンドを指定してください。")
+                : QStringLiteral("Set the Python command under Settings > App settings > UMA."));
+        showAppSettingsDialog();
+        return;
+    }
+    const QString program = commandParts.takeFirst();
+
+    QTemporaryDir tempDir(QDir::tempPath() + QStringLiteral("/aseapp_uma_XXXXXX"));
+    if (!tempDir.isValid()) {
+        QMessageBox::critical(
+            this,
+            m_japanese ? QStringLiteral("一時フォルダを作成できません") : QStringLiteral("Cannot create temporary folder"),
+            m_japanese ? QStringLiteral("UMA用の一時フォルダを作成できませんでした。") : QStringLiteral("Failed to create a temporary folder for UMA."));
+        return;
+    }
+
+    const QString inputPath = tempDir.filePath(QStringLiteral("input.extxyz"));
+    const QString outputPath = tempDir.filePath(QStringLiteral("optimized.extxyz"));
+    const QString summaryPath = tempDir.filePath(QStringLiteral("summary.json"));
+    const QString constraintsPath = tempDir.filePath(QStringLiteral("constraints.json"));
+    QString writeError;
+    if (!writeXyzFile(m_structure, inputPath, true, &writeError)) {
+        QMessageBox::critical(this, QStringLiteral("UMA"), writeError);
+        return;
+    }
+    if (!writeUmaConstraintFile(m_structure, constraintsPath, &writeError)) {
+        QMessageBox::critical(this, QStringLiteral("UMA"), writeError);
+        return;
+    }
+
+    const QString taskName = appStringSetting({QStringLiteral("uma"), QStringLiteral("taskName")}, QStringLiteral("oc20")).trimmed();
+    const QString device = appStringSetting({QStringLiteral("uma"), QStringLiteral("device")}, QStringLiteral("cuda")).trimmed();
+    const double fmax = std::max(0.001, appDoubleSetting({QStringLiteral("uma"), QStringLiteral("fmax")}, 0.05));
+    const int maxSteps = std::max(1, appIntSetting({QStringLiteral("uma"), QStringLiteral("maxSteps")}, 500));
+    const bool fixSelectiveAtoms = appBoolSetting({QStringLiteral("uma"), QStringLiteral("fixSelectiveAtoms")}, true);
+
+    QStringList arguments = commandParts;
+    arguments << workerPath
+              << QStringLiteral("--input") << inputPath
+              << QStringLiteral("--output") << outputPath
+              << QStringLiteral("--summary") << summaryPath
+              << QStringLiteral("--model") << modelInfo.absoluteFilePath()
+              << QStringLiteral("--task") << (taskName.isEmpty() ? QStringLiteral("oc20") : taskName)
+              << QStringLiteral("--device") << (device.isEmpty() ? QStringLiteral("cuda") : device)
+              << QStringLiteral("--fmax") << QString::number(fmax, 'g', 10)
+              << QStringLiteral("--steps") << QString::number(maxSteps)
+              << QStringLiteral("--constraints") << constraintsPath;
+    if (fixSelectiveAtoms) {
+        arguments << QStringLiteral("--fix-selective");
+    }
+
+    QProcess process;
+    process.setProcessChannelMode(QProcess::MergedChannels);
+    QString processOutput;
+    connect(&process, &QProcess::readyReadStandardOutput, this, [&]() {
+        processOutput += QString::fromUtf8(process.readAllStandardOutput());
+    });
+
+    QProgressDialog progress(
+        m_japanese
+            ? QStringLiteral("UMAで構造最適化を実行中です。初回は重みファイルの読み込みに時間がかかります...")
+            : QStringLiteral("Running UMA relaxation. The first run can take time while loading the checkpoint..."),
+        m_japanese ? QStringLiteral("キャンセル") : QStringLiteral("Cancel"),
+        0,
+        0,
+        this);
+    progress.setWindowTitle(m_japanese ? QStringLiteral("UMA構造最適化") : QStringLiteral("UMA relaxation"));
+    progress.setWindowModality(Qt::WindowModal);
+    progress.setMinimumDuration(0);
+    progress.show();
+
+    process.start(program, arguments);
+    if (!process.waitForStarted(10000)) {
+        progress.close();
+        QMessageBox::critical(
+            this,
+            m_japanese ? QStringLiteral("UMA起動失敗") : QStringLiteral("Failed to start UMA"),
+            m_japanese
+                ? QStringLiteral("Pythonコマンドを起動できませんでした:\n%1").arg(pythonCommand)
+                : QStringLiteral("Failed to start the Python command:\n%1").arg(pythonCommand));
+        return;
+    }
+
+    bool canceled = false;
+    while (process.state() != QProcess::NotRunning) {
+        process.waitForFinished(100);
+        QApplication::processEvents(QEventLoop::AllEvents, 100);
+        if (progress.wasCanceled()) {
+            canceled = true;
+            process.kill();
+            process.waitForFinished(5000);
+            break;
+        }
+        const QString tail = lastTextLines(processOutput, 4);
+        if (!tail.isEmpty()) {
+            progress.setLabelText(
+                (m_japanese ? QStringLiteral("UMAで構造最適化を実行中です...\n") : QStringLiteral("Running UMA relaxation...\n"))
+                + tail);
+        }
+    }
+    processOutput += QString::fromUtf8(process.readAllStandardOutput());
+    progress.close();
+
+    if (canceled) {
+        statusBar()->showMessage(m_japanese ? QStringLiteral("UMA構造最適化をキャンセルしました。") : QStringLiteral("Canceled UMA relaxation."), 3500);
+        return;
+    }
+
+    const QString summaryText = readUtf8TextFile(summaryPath);
+    if (process.exitStatus() != QProcess::NormalExit || process.exitCode() != 0 || !QFileInfo::exists(outputPath)) {
+        tempDir.setAutoRemove(false);
+        QMessageBox box(QMessageBox::Critical,
+                        m_japanese ? QStringLiteral("UMA構造最適化に失敗しました") : QStringLiteral("UMA relaxation failed"),
+                        m_japanese
+                            ? QStringLiteral("Python worker が失敗しました。一時フォルダを残しました:\n%1").arg(tempDir.path())
+                            : QStringLiteral("The Python worker failed. The temporary folder was kept:\n%1").arg(tempDir.path()),
+                        QMessageBox::Ok,
+                        this);
+        box.setDetailedText(QStringLiteral("Command:\n%1 %2\n\nSummary:\n%3\n\nOutput:\n%4")
+            .arg(program, arguments.join(QLatin1Char(' ')), summaryText, lastTextLines(processOutput, 80)));
+        box.exec();
+        return;
+    }
+
+    QString loadError;
+    const auto optimizedStructure = m_loader->load(outputPath, &loadError);
+    if (!optimizedStructure.has_value()) {
+        tempDir.setAutoRemove(false);
+        QMessageBox::critical(
+            this,
+            m_japanese ? QStringLiteral("UMA結果を読み込めません") : QStringLiteral("Cannot load UMA result"),
+            m_japanese
+                ? QStringLiteral("最適化後の構造を読み込めませんでした。一時フォルダを残しました:\n%1\n\n%2").arg(tempDir.path(), loadError)
+                : QStringLiteral("Failed to load the optimized structure. The temporary folder was kept:\n%1\n\n%2").arg(tempDir.path(), loadError));
+        return;
+    }
+
+    StructureData updated = *optimizedStructure;
+    updated.title = m_structure.title.isEmpty()
+        ? QStringLiteral("UMA optimized")
+        : QStringLiteral("%1 (UMA %2)").arg(m_structure.title, taskName.isEmpty() ? QStringLiteral("oc20") : taskName);
+    if (updated.atoms.size() == m_structure.atoms.size()) {
+        for (std::size_t i = 0; i < updated.atoms.size(); ++i) {
+            updated.atoms[i].atomId = m_structure.atoms[i].atomId;
+            if (!m_structure.atoms[i].tag.trimmed().isEmpty()) {
+                updated.atoms[i].tag = m_structure.atoms[i].tag;
+            }
+            updated.atoms[i].movable = m_structure.atoms[i].movable;
+        }
+    }
+
+    replaceStructureFromEdit(updated, QStringLiteral("uma_optimization"));
+
+    QString summaryLine;
+    const QJsonDocument summaryDoc = QJsonDocument::fromJson(summaryText.toUtf8());
+    if (summaryDoc.isObject()) {
+        const QJsonObject summary = summaryDoc.object();
+        summaryLine = QStringLiteral("steps=%1, final_energy=%2 eV, final_fmax=%3 eV/Å")
+            .arg(summary.value(QStringLiteral("optimizer_steps")).toInt())
+            .arg(summary.value(QStringLiteral("final_energy_ev")).toDouble(std::numeric_limits<double>::quiet_NaN()), 0, 'g', 8)
+            .arg(summary.value(QStringLiteral("final_fmax_ev_per_ang")).toDouble(std::numeric_limits<double>::quiet_NaN()), 0, 'g', 8);
+    }
+    statusBar()->showMessage(
+        m_japanese
+            ? QStringLiteral("UMA構造最適化が完了しました。%1").arg(summaryLine)
+            : QStringLiteral("UMA relaxation finished. %1").arg(summaryLine),
+        6000);
+    QMessageBox::information(
+        this,
+        m_japanese ? QStringLiteral("UMA構造最適化完了") : QStringLiteral("UMA relaxation finished"),
+        m_japanese
+            ? QStringLiteral("最適化結果を描画しました。\n%1").arg(summaryLine)
+            : QStringLiteral("The optimized structure has been loaded and rendered.\n%1").arg(summaryLine));
 }
 
 void MainWindow::saveStructureAs() {

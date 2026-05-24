@@ -3,6 +3,8 @@ ASEapp Surface Builder CHANGELOG
 
 Unreleased
 ----------
+- Add configurable UMA relaxation from the Structure menu and surface panel. The app now stores the UMA model checkpoint path, Python command, task, device, fmax, max steps, and selective-dynamics handling in the app settings JSON.
+- Add a Python UMA worker script that runs ASE/fairchem in a separate process and reloads the optimized extXYZ result into the canvas.
 
 Version 1.3.3 - Vacuum placement and large-scene UX fixes
 ---------------------------------------------------------

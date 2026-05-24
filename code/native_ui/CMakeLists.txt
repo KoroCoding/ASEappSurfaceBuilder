@@ -221,6 +221,7 @@ if(BUILD_TESTING)
 endif()
 
 install(FILES README.txt QUICKSTART.txt CHANGELOG.txt DESTINATION .)
+install(PROGRAMS tools/uma_relax_worker.py DESTINATION tools)
 
 if(APPLE)
   set(ASEAPP_MACOS_PUBLIC_CERT "${CMAKE_CURRENT_SOURCE_DIR}/certs/ASEappSurfaceBuilderLocalCodeSigning.cer")

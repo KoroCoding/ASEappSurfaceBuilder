@@ -1,4 +1,4 @@
-﻿{
+{
   "schemaVersion": 1,
   "ui": {
     "japanese": true,
@@ -24,5 +24,14 @@
       "atomScalePercent": 100.0
     },
     "customBondRanges": []
+  },
+  "uma": {
+    "pythonCommand": "python",
+    "modelPath": "",
+    "taskName": "oc20",
+    "device": "cuda",
+    "fmax": 0.05,
+    "maxSteps": 500,
+    "fixSelectiveAtoms": true
   }
 }
