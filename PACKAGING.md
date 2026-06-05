@@ -22,6 +22,7 @@ standalone_exe/                          # 確認済み配布物の配置先
 - Windows: `standalone_exe/windows/ASEappSurfaceBuilder-1.1.1-Windows.exe`
 - Windows: `standalone_exe/windows/ASEappSurfaceBuilder-1.1.0-Windows.exe`
 - Windows: `standalone_exe/windows/ASEappSurfaceBuilder-1.0.0-Windows.exe`
+- macOS: `standalone_exe/macos/ASEappSurfaceBuilder-1.3.3-macOS.dmg`
 - macOS: `standalone_exe/macos/ASEappSurfaceBuilder-1.3.2-macOS.dmg`
 - macOS: `standalone_exe/macos/ASEappSurfaceBuilder-1.2.0-macOS.dmg`
 - macOS: `standalone_exe/macos/ASEappSurfaceBuilder-1.1.0-macOS.dmg`
@@ -144,7 +145,7 @@ macOS では次のスクリプトを使ってください。
 standalone_exe/macos/ASEappSurfaceBuilder-1.3.3-macOS.dmg
 ```
 
-互換確認用として `standalone_exe/macos/ASEappSurfaceBuilder-1.2.0-macOS.dmg`、`standalone_exe/macos/ASEappSurfaceBuilder-1.1.0-macOS.dmg`、`standalone_exe/macos/ASEappSurfaceBuilder-1.0.0-macOS.dmg` も残しています。
+互換確認用として `standalone_exe/macos/ASEappSurfaceBuilder-1.3.2-macOS.dmg`、`standalone_exe/macos/ASEappSurfaceBuilder-1.2.0-macOS.dmg`、`standalone_exe/macos/ASEappSurfaceBuilder-1.1.0-macOS.dmg`、`standalone_exe/macos/ASEappSurfaceBuilder-1.0.0-macOS.dmg` も残しています。
 
 `Documents/GitHub` など macOS FileProvider 配下で直接 CPack staging を作ると、`com.apple.FinderInfo` などの拡張属性が `.app` に付いて `codesign` が失敗することがあります。そのため、スクリプトは staging を `/private/tmp/aseapp-surface-builder-cpack` に作成し、検証済み DMG だけを `standalone_exe/macos/` へコピーします。
 

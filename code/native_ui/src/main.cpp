@@ -7,6 +7,7 @@
 #include <QPixmap>
 #include <QSplashScreen>
 #include <QStringList>
+#include <QSurfaceFormat>
 #include <QTimer>
 #include <QtGlobal>
 
@@ -57,10 +58,23 @@ void showSplashMessage(QSplashScreen& splash, const QString& message) {
     qApp->processEvents();
 }
 #endif
+
+void configureOpenGLSurfaceFormat() {
+    QSurfaceFormat format;
+    format.setVersion(3, 3);
+    format.setProfile(QSurfaceFormat::CoreProfile);
+    format.setDepthBufferSize(24);
+    format.setStencilBufferSize(8);
+    format.setSamples(4);
+    // macOS requires this before QApplication so QOpenGLWidget can share a
+    // Core Profile context with Qt's backing-store compositor.
+    QSurfaceFormat::setDefaultFormat(format);
+}
 }  // namespace
 
 int main(int argc, char* argv[]) {
     const QString qtPluginPath = aseapp::configureQtPluginPath(argc, argv);
+    configureOpenGLSurfaceFormat();
     QApplication app(argc, argv);
     if (!qtPluginPath.isEmpty()) {
         QCoreApplication::addLibraryPath(qtPluginPath);

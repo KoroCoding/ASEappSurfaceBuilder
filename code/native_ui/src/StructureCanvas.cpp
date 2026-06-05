@@ -793,8 +793,6 @@ StructureCanvas::StructureCanvas(QWidget* parent)
     format.setStencilBufferSize(8);
     format.setSamples(4);
     setFormat(format);
-    setUpdateBehavior(QOpenGLWidget::NoPartialUpdate);
-    setAttribute(Qt::WA_OpaquePaintEvent, true);
     setMouseTracking(true);
     setFocusPolicy(Qt::StrongFocus);
     setAutoFillBackground(false);

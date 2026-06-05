@@ -3,6 +3,7 @@ ASEapp Surface Builder CHANGELOG
 
 Unreleased
 ----------
+- Fix macOS QOpenGLWidget context setup so the canvas no longer shows mirrored stale UI content on startup.
 - Make Esc reliably clear atom selection by removing duplicate shortcut registration and letting the structure canvas handle Esc directly.
 - Keep atom spheres strictly scene-scaled by removing the screen-space radius floor/density zoom scaling that made atoms inflate when zooming out, and remove fixed supercell multiplier/matrix/volume caps.
 - Add configurable UMA relaxation from the Structure menu and surface panel. A run-settings window now lets users adjust the UMA model checkpoint path, Python command, task, device, fmax threshold, max steps, and selective-dynamics handling immediately before execution, then saves those values to the app settings JSON.
