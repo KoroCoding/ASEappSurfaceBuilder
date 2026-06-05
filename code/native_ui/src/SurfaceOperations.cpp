@@ -7,6 +7,7 @@
 #include <cmath>
 #include <QObject>
 #include <limits>
+#include <new>
 
 namespace {
 QVector3D toCartesian(const std::array<QVector3D, 3>& cell, const QVector3D& frac) {
@@ -14,9 +15,23 @@ QVector3D toCartesian(const std::array<QVector3D, 3>& cell, const QVector3D& fra
 }
 
 long long determinant3x3(const SupercellTransformMatrix& matrix) {
-    return static_cast<long long>(matrix[0][0]) * (matrix[1][1] * matrix[2][2] - matrix[1][2] * matrix[2][1])
-        - static_cast<long long>(matrix[0][1]) * (matrix[1][0] * matrix[2][2] - matrix[1][2] * matrix[2][0])
-        + static_cast<long long>(matrix[0][2]) * (matrix[1][0] * matrix[2][1] - matrix[1][1] * matrix[2][0]);
+    const long double det =
+        static_cast<long double>(matrix[0][0])
+            * (static_cast<long double>(matrix[1][1]) * matrix[2][2]
+                - static_cast<long double>(matrix[1][2]) * matrix[2][1])
+        - static_cast<long double>(matrix[0][1])
+            * (static_cast<long double>(matrix[1][0]) * matrix[2][2]
+                - static_cast<long double>(matrix[1][2]) * matrix[2][0])
+        + static_cast<long double>(matrix[0][2])
+            * (static_cast<long double>(matrix[1][0]) * matrix[2][1]
+                - static_cast<long double>(matrix[1][1]) * matrix[2][0]);
+    if (det > static_cast<long double>(std::numeric_limits<long long>::max())) {
+        return std::numeric_limits<long long>::max();
+    }
+    if (det < static_cast<long double>(std::numeric_limits<long long>::min())) {
+        return std::numeric_limits<long long>::min();
+    }
+    return static_cast<long long>(std::llround(det));
 }
 
 bool invert3x3(const double matrix[3][3], double inverse[3][3]) {
@@ -349,7 +364,25 @@ StructureData makeSupercellStructure(const StructureData& source, int aMult, int
         source.cellVectors[2] * static_cast<float>(c)
     };
     out.atoms.clear();
-    out.atoms.reserve(source.atoms.size() * static_cast<std::size_t>(a * b * c));
+    const std::size_t sourceAtomCount = source.atoms.size();
+    const std::size_t aCount = static_cast<std::size_t>(a);
+    const std::size_t bCount = static_cast<std::size_t>(b);
+    const std::size_t cCount = static_cast<std::size_t>(c);
+    const std::size_t maxSize = std::numeric_limits<std::size_t>::max();
+    if (aCount <= maxSize / bCount) {
+        const std::size_t abCount = aCount * bCount;
+        if (cCount <= maxSize / abCount) {
+            const std::size_t volumeFactor = abCount * cCount;
+            if (sourceAtomCount == 0 || volumeFactor <= maxSize / sourceAtomCount) {
+                try {
+                    out.atoms.reserve(sourceAtomCount * volumeFactor);
+                } catch (const std::bad_alloc&) {
+                    // No fixed supercell cap: continue without pre-allocation
+                    // and let the actual append path grow as memory permits.
+                }
+            }
+        }
+    }
 
     int nextId = 1;
     for (int ia = 0; ia < a; ++ia) {
@@ -382,18 +415,11 @@ StructureData makeSupercellStructure(
     if (errorMessage != nullptr) {
         errorMessage->clear();
     }
-    constexpr long long kMaxVolumeFactor = 8000;
     constexpr double kEpsilon = 1.0e-9;
     const long long determinant = supercellTransformDeterminant(matrix);
     if (determinant <= 0) {
         if (errorMessage != nullptr) {
             *errorMessage = QObject::tr("Supercell transform matrix must be right-handed and have a positive non-zero determinant.");
-        }
-        return source;
-    }
-    if (determinant > kMaxVolumeFactor) {
-        if (errorMessage != nullptr) {
-            *errorMessage = QObject::tr("Supercell transform volume factor %1 is too large. Use %2 or less.").arg(determinant).arg(kMaxVolumeFactor);
         }
         return source;
     }
@@ -443,9 +469,24 @@ StructureData makeSupercellStructure(
         }
     }
 
-    const std::size_t expectedAtomCount = source.atoms.size() * static_cast<std::size_t>(determinant);
+    const std::size_t sourceAtomCount = source.atoms.size();
+    const std::size_t determinantSize = static_cast<std::size_t>(determinant);
+    if (sourceAtomCount > 0 && determinantSize > std::numeric_limits<std::size_t>::max() / sourceAtomCount) {
+        if (errorMessage != nullptr) {
+            *errorMessage = QObject::tr("Supercell transform would create too many atoms for this platform.");
+        }
+        return source;
+    }
+    const std::size_t expectedAtomCount = sourceAtomCount * determinantSize;
     out.atoms.clear();
-    out.atoms.reserve(expectedAtomCount);
+    try {
+        out.atoms.reserve(expectedAtomCount);
+    } catch (const std::bad_alloc&) {
+        if (errorMessage != nullptr) {
+            *errorMessage = QObject::tr("Not enough memory to create %1 atoms for this supercell.").arg(expectedAtomCount);
+        }
+        return source;
+    }
 
     int nextId = 1;
     for (const auto& atom : source.atoms) {

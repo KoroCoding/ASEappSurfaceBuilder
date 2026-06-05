@@ -7,6 +7,7 @@
 #include <QPixmap>
 #include <QSplashScreen>
 #include <QStringList>
+#include <QTimer>
 #include <QtGlobal>
 
 #include "AppStartup.h"
@@ -83,13 +84,6 @@ int main(int argc, char* argv[]) {
     MainWindow window;
     singleInstance.attachTo(window);
 
-    for (const QString& path : requestedPaths) {
-#ifdef Q_OS_MACOS
-        showSplashMessage(splash, QStringLiteral("Loading structure..."));
-#endif
-        window.loadStructureFile(path);
-    }
-
 #ifdef Q_OS_MACOS
     showSplashMessage(splash, QStringLiteral("Opening main window..."));
 #endif
@@ -99,5 +93,12 @@ int main(int argc, char* argv[]) {
     window.raise();
     window.activateWindow();
 #endif
+    if (!requestedPaths.isEmpty()) {
+        QTimer::singleShot(0, &window, [&window, requestedPaths]() {
+            for (const QString& path : requestedPaths) {
+                window.loadStructureFile(path);
+            }
+        });
+    }
     return app.exec();
 }

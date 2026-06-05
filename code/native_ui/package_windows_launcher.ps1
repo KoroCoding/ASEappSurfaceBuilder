@@ -2,8 +2,9 @@ param(
     [string]$Version = '1.3.3',
     [string]$ZipPath = '',
     [string]$OutputExe = '',
+    [string]$QtBinRoot = $env:ASEAPP_QT_BIN_ROOT,
     [string]$SignCertThumbprint = $env:ASEAPP_CODESIGN_THUMBPRINT,
-    [string]$SignCertSubject = 'CN=ASEapp Surface Builder Local Code Signing'
+    [string]$SignCertSubject = $env:ASEAPP_CODESIGN_SUBJECT
 )
 
 $ErrorActionPreference = 'Stop'
@@ -77,12 +78,14 @@ function Sign-IfNeeded([string]$path) {
     }
 }
 
-function Sign-FirstPartyPayloadBinaries([string]$root) {
+function Sign-PayloadPortableExecutableFiles([string]$root) {
     if (-not $signingCert) {
         return
     }
 
-    Get-ChildItem -LiteralPath (Join-Path $root 'bin') -File -Filter 'ASEapp*.exe' -ErrorAction SilentlyContinue |
+    Get-ChildItem -LiteralPath $root -Recurse -File -ErrorAction SilentlyContinue |
+        Where-Object { $_.Extension -in @('.exe', '.dll') } |
+        Sort-Object FullName |
         ForEach-Object {
             Sign-IfNeeded $_.FullName
         }
@@ -175,6 +178,17 @@ if (-not $vcDlls) {
 }
 
 function Get-QtBinRoot {
+    if (-not [string]::IsNullOrWhiteSpace($QtBinRoot)) {
+        $candidate = [System.IO.Path]::GetFullPath($QtBinRoot)
+        if (Test-Path (Join-Path $candidate 'windeployqt.exe')) {
+            return $candidate
+        }
+        if (Test-Path (Join-Path $candidate 'Qt6Core.dll')) {
+            return $candidate
+        }
+        throw "QtBinRoot does not look like a Qt bin directory: $QtBinRoot"
+    }
+
     if ($env:CONDA_PREFIX) {
         $candidate = Join-Path $env:CONDA_PREFIX 'Library\bin'
         if (Test-Path $candidate) {
@@ -207,7 +221,7 @@ function Get-PythonExe {
 }
 
 $qtBinRoot = Get-QtBinRoot
-$qtRuntimeDllNames = @(
+$qtOptionalRuntimeDllNames = @(
     'double-conversion.dll'
     'freetype.dll'
     'jpeg8.dll'
@@ -227,15 +241,50 @@ $qtRuntimeDllNames = @(
     'tiff.dll'
 )
 
+function Invoke-WindeployQt([string]$exePath, [string]$payloadRoot) {
+    $windeployQt = Join-Path $qtBinRoot 'windeployqt.exe'
+    if (-not (Test-Path -LiteralPath $windeployQt)) {
+        Write-Host "windeployqt was not found under $qtBinRoot; using files already present in the payload."
+        return
+    }
+
+    $deployArgs = @(
+        '--release',
+        '--no-compiler-runtime',
+        '--no-translations',
+        '--dir',
+        '.',
+        '--libdir',
+        'bin',
+        '--plugindir',
+        'plugins',
+        '--translationdir',
+        'translations',
+        '--force',
+        $exePath
+    )
+    Push-Location -LiteralPath $payloadRoot
+    try {
+        & $windeployQt @deployArgs | Out-Host
+        if ($LASTEXITCODE -ne 0) {
+            throw "windeployqt failed for $exePath"
+        }
+    }
+    finally {
+        Pop-Location
+    }
+}
+
 function Copy-RuntimeDlls([string]$binDir) {
     New-Item -ItemType Directory -Path $binDir -Force | Out-Null
     foreach ($dll in $vcDlls) {
         Copy-Item -LiteralPath $dll.FullName -Destination (Join-Path $binDir $dll.Name) -Force
     }
-    foreach ($dllName in $qtRuntimeDllNames) {
+    foreach ($dllName in $qtOptionalRuntimeDllNames) {
         $source = Join-Path $qtBinRoot $dllName
         if (-not (Test-Path $source)) {
-            throw "Required Qt runtime DLL was not found: $source"
+            Write-Host "Optional Qt runtime DLL was not found; skipped: $source"
+            continue
         }
         Copy-Item -LiteralPath $source -Destination (Join-Path $binDir $dllName) -Force
     }
@@ -251,9 +300,14 @@ New-Item -ItemType Directory -Path $launcherRoot -Force | Out-Null
 try {
     Expand-Archive -LiteralPath $zipPath -DestinationPath $payloadRoot -Force
     $binDir = Join-Path $payloadRoot 'bin'
+    $payloadExe = Join-Path $binDir 'ASEappNativeUI.exe'
+    if (-not (Test-Path -LiteralPath $payloadExe)) {
+        throw "Payload executable was not found: $payloadExe"
+    }
+    Invoke-WindeployQt $payloadExe $payloadRoot
     Copy-RuntimeDlls $binDir
     Copy-WindowsTrustSupportFiles $payloadRoot
-    Sign-FirstPartyPayloadBinaries $payloadRoot
+    Sign-PayloadPortableExecutableFiles $payloadRoot
     Write-PayloadManifest $payloadRoot
 
     $payloadZip = Join-Path $stagingRoot 'payload.zip'
@@ -268,7 +322,6 @@ try {
     if (Test-Path $expandedPayloadRoot) {
         try {
             Copy-Item -Path (Join-Path $payloadRoot '*') -Destination $expandedPayloadRoot -Recurse -Force
-            Copy-RuntimeDlls $expandedBinDir
             Write-Host "Updated expanded payload: $expandedPayloadRoot"
         }
         catch {

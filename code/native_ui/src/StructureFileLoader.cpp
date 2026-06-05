@@ -3,6 +3,7 @@
 
 #include <QFile>
 #include <QFileInfo>
+#include <QHash>
 #include <QJsonArray>
 #include <QJsonDocument>
 #include <QJsonObject>
@@ -16,6 +17,8 @@
 #include <unordered_map>
 
 namespace {
+constexpr double kCifSymmetryDuplicateTolerance = 1.0e-4;
+
 QColor elementColor(const QString& element) {
     return vestaElementColor(element);
 }
@@ -290,12 +293,95 @@ bool sameFractionalSite(const QVector3D& lhs, const QVector3D& rhs, double toler
         && componentDistance(lhs.z(), rhs.z()) <= tolerance;
 }
 
-bool containsEquivalentFractionalAtom(const std::vector<NativeAtom>& atoms, const QString& element, const QVector3D& fractional) {
+bool isIdentityCifSymmetryOperation(const CifSymmetryOperation& operation) {
+    for (int axis = 0; axis < 3; ++axis) {
+        const CifSymmetryExpression& expression = operation.expressions[static_cast<std::size_t>(axis)];
+        if (std::abs(wrapFractionalComponent(expression.offset)) > 1.0e-7) {
+            return false;
+        }
+        for (int component = 0; component < 3; ++component) {
+            const double expected = axis == component ? 1.0 : 0.0;
+            if (std::abs(expression.coefficients[static_cast<std::size_t>(component)] - expected) > 1.0e-7) {
+                return false;
+            }
+        }
+    }
+    return true;
+}
+
+int cifSymmetryBucketCount() {
+    return static_cast<int>(std::ceil(1.0 / kCifSymmetryDuplicateTolerance));
+}
+
+int wrapCifSymmetryBucket(int value) {
+    const int bucketCount = cifSymmetryBucketCount();
+    value %= bucketCount;
+    if (value < 0) {
+        value += bucketCount;
+    }
+    return value;
+}
+
+int cifSymmetryBucket(double value) {
+    const double wrapped = wrapFractionalComponent(value);
+    const int bucketCount = cifSymmetryBucketCount();
+    int bucket = static_cast<int>(std::floor(wrapped / kCifSymmetryDuplicateTolerance));
+    if (bucket >= bucketCount) {
+        bucket = 0;
+    }
+    return std::clamp(bucket, 0, bucketCount - 1);
+}
+
+QString cifSymmetrySiteKey(const QString& normalizedElement, int x, int y, int z) {
+    return QStringLiteral("%1|%2|%3|%4")
+        .arg(normalizedElement)
+        .arg(wrapCifSymmetryBucket(x))
+        .arg(wrapCifSymmetryBucket(y))
+        .arg(wrapCifSymmetryBucket(z));
+}
+
+void indexFractionalAtom(
+    QHash<QString, std::vector<int>>& index,
+    const NativeAtom& atom,
+    int atomIndex)
+{
+    const QString normalizedElement = normalizeElement(atom.element);
+    const int x = cifSymmetryBucket(atom.fractional.x());
+    const int y = cifSymmetryBucket(atom.fractional.y());
+    const int z = cifSymmetryBucket(atom.fractional.z());
+    index[cifSymmetrySiteKey(normalizedElement, x, y, z)].push_back(atomIndex);
+}
+
+bool containsEquivalentFractionalAtom(
+    const std::vector<NativeAtom>& atoms,
+    const QHash<QString, std::vector<int>>& index,
+    const QString& element,
+    const QVector3D& fractional)
+{
     const QString normalizedElement = normalizeElement(element);
-    return std::any_of(atoms.begin(), atoms.end(), [&](const NativeAtom& atom) {
-        return normalizeElement(atom.element) == normalizedElement
-            && sameFractionalSite(atom.fractional, fractional);
-    });
+    const int x = cifSymmetryBucket(fractional.x());
+    const int y = cifSymmetryBucket(fractional.y());
+    const int z = cifSymmetryBucket(fractional.z());
+    for (int dx = -1; dx <= 1; ++dx) {
+        for (int dy = -1; dy <= 1; ++dy) {
+            for (int dz = -1; dz <= 1; ++dz) {
+                const auto it = index.constFind(cifSymmetrySiteKey(normalizedElement, x + dx, y + dy, z + dz));
+                if (it == index.cend()) {
+                    continue;
+                }
+                for (int atomIndex : it.value()) {
+                    if (atomIndex < 0 || atomIndex >= static_cast<int>(atoms.size())) {
+                        continue;
+                    }
+                    const NativeAtom& atom = atoms[static_cast<std::size_t>(atomIndex)];
+                    if (sameFractionalSite(atom.fractional, fractional, kCifSymmetryDuplicateTolerance)) {
+                        return true;
+                    }
+                }
+            }
+        }
+    }
+    return false;
 }
 
 std::vector<NativeAtom> expandAtomsByCifSymmetry(const std::vector<NativeAtom>& asymmetricAtoms,
@@ -312,9 +398,14 @@ std::vector<NativeAtom> expandAtomsByCifSymmetry(const std::vector<NativeAtom>& 
     if (operations.empty()) {
         return asymmetricAtoms;
     }
+    if (operations.size() == 1 && isIdentityCifSymmetryOperation(operations.front())) {
+        return asymmetricAtoms;
+    }
 
     std::vector<NativeAtom> expandedAtoms;
     expandedAtoms.reserve(asymmetricAtoms.size() * operations.size());
+    QHash<QString, std::vector<int>> expandedAtomIndex;
+    expandedAtomIndex.reserve(static_cast<int>(asymmetricAtoms.size() * operations.size()));
     for (const NativeAtom& sourceAtom : asymmetricAtoms) {
         const QString baseTag = sourceAtom.tag.trimmed().isEmpty()
             ? normalizeElement(sourceAtom.element)
@@ -322,7 +413,7 @@ std::vector<NativeAtom> expandAtomsByCifSymmetry(const std::vector<NativeAtom>& 
         int generatedForThisSite = 0;
         for (const CifSymmetryOperation& operation : operations) {
             const QVector3D fractional = applyCifSymmetryOperation(operation, sourceAtom.fractional);
-            if (containsEquivalentFractionalAtom(expandedAtoms, sourceAtom.element, fractional)) {
+            if (containsEquivalentFractionalAtom(expandedAtoms, expandedAtomIndex, sourceAtom.element, fractional)) {
                 continue;
             }
             NativeAtom atom = sourceAtom;
@@ -333,6 +424,7 @@ std::vector<NativeAtom> expandAtomsByCifSymmetry(const std::vector<NativeAtom>& 
                 ? baseTag
                 : QStringLiteral("%1_sym%2").arg(baseTag).arg(generatedForThisSite + 1, 2, 10, QChar('0'));
             expandedAtoms.push_back(atom);
+            indexFractionalAtom(expandedAtomIndex, atom, static_cast<int>(expandedAtoms.size()) - 1);
             ++generatedForThisSite;
         }
     }

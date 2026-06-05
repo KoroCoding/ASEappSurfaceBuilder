@@ -5,6 +5,7 @@
 #include <QVector4D>
 
 #include <array>
+#include <cstddef>
 #include <vector>
 
 #include "ElementStyle.h"
@@ -165,6 +166,8 @@ private:
     void setLoadedPrecursors(std::vector<PrecursorTemplate> precursors, const QString& preferredName = QString());
     bool maybeSaveChanges();
     bool loadFromPath(const QString& path);
+    void loadFromPathAsync(const QString& path);
+    bool installLoadedStructure(const StructureData& loaded);
     QString defaultOpenDirectory() const;
     QString formatVector(const QVector3D& vec) const;
     QString describePlacementRule(const SurfacePlacementRule& rule) const;
@@ -173,6 +176,10 @@ private:
     EditSnapshot captureEditSnapshot() const;
     void restoreEditSnapshot(const EditSnapshot& snapshot, bool forceDirty);
     void pushUndoState(const QString& label);
+    std::size_t maxUndoStatesForCurrentStructure() const;
+    void pruneUndoRedoStacks();
+    void rebuildAtomIdIndexCache();
+    std::vector<int> selectedAtomStructureIndices();
     void replaceStructureFromEdit(const StructureData& structure, const QString& label);
     void updateUndoRedoActions();
     QString structureDiagnosticsText(bool includeMeasurements) const;
@@ -271,6 +278,7 @@ private:
     QPushButton* m_exportPoseJsonButton = nullptr;
     QPushButton* m_exportPoseSnippetButton = nullptr;
     std::vector<int> m_selectedAtomIds;
+    QHash<int, int> m_atomIdToIndexCache;
     QHash<QString, BondDistanceRange> m_customBondRanges;
     std::vector<PrecursorTemplate> m_loadedPrecursors;
     std::vector<DocumentState> m_documents;
@@ -284,5 +292,6 @@ private:
     bool m_moveModelMode = false;
     int m_activeDocumentIndex = -1;
     bool m_restoringDocument = false;
+    int m_asyncLoadGeneration = 0;
     bool m_persistDisplayStartupSettings = true;
 };

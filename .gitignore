@@ -2,6 +2,7 @@
 $tmp/
 .DS_Store
 code/native_ui/build/
+code/native_ui/build-*/
 code/native_ui/install/
 code/native_ui/dist/
 code/native_ui/certs/
@@ -20,3 +21,5 @@ CMakeUserPresets.json
 *.pem
 *.cer
 *.crt
+standalone_exe/windows/*-selfsigned.exe
+standalone_exe/windows/launch-verification.png

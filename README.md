@@ -248,8 +248,9 @@ ASEapp can launch UMA through an external Python environment instead of bundling
 
 1. Open **Settings > App settings > UMA**.
 2. Set the Python command, for example `python`, `conda run -n uma_proj python`, or a full `python.exe` path.
-3. Set the UMA checkpoint path, task name such as `oc20`, device, `fmax`, and maximum steps.
+3. Set the default UMA checkpoint path, task name such as `oc20`, device, `fmax`, and maximum steps.
 4. Choose **Structure > UMA relaxation** or the **UMA relaxation** button in the Supercell/Vacuum panel.
-5. ASEapp writes the current structure to a temporary extXYZ file, runs `tools/uma_relax_worker.py`, and redraws the optimized result when the worker succeeds.
+5. Review or override the task, convergence threshold (`fmax`), max steps, device, and fixed-atom handling in the run-settings window, then start the run.
+6. ASEapp writes the current structure to a temporary extXYZ file, runs `tools/uma_relax_worker.py`, and redraws the optimized result when the worker succeeds.
 
 The model checkpoint is intentionally stored as an app setting/JSON value and is not embedded in the executable. Large checkpoints such as `uma-m-1p1.pt` should stay outside Git unless a dedicated UMA package is intentionally created.

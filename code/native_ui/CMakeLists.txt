@@ -19,7 +19,16 @@ if(NOT DEFINED CMAKE_PREFIX_PATH)
 endif()
 
 find_package(Python3 REQUIRED COMPONENTS Interpreter)
-find_package(Qt6 REQUIRED COMPONENTS Widgets Gui Core Network)
+find_package(Qt6 REQUIRED COMPONENTS Widgets Gui Core Network OpenGLWidgets)
+
+set(ASEAPP_QT_BIN_DIR "")
+get_target_property(ASEAPP_QT_CORE_RUNTIME Qt6::Core IMPORTED_LOCATION_RELEASE)
+if(NOT ASEAPP_QT_CORE_RUNTIME)
+  get_target_property(ASEAPP_QT_CORE_RUNTIME Qt6::Core IMPORTED_LOCATION)
+endif()
+if(ASEAPP_QT_CORE_RUNTIME)
+  get_filename_component(ASEAPP_QT_BIN_DIR "${ASEAPP_QT_CORE_RUNTIME}" DIRECTORY)
+endif()
 
 if(MSVC AND WIN32 AND DEFINED ENV{CONDA_PREFIX})
   # Conda's Qt packages are release CRT builds. Keep Debug targets on /MD as
@@ -81,7 +90,7 @@ add_executable(aseapp_native_ui
 
 target_include_directories(aseapp_native_ui PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/src)
 
-target_link_libraries(aseapp_native_ui PRIVATE Qt6::Widgets Qt6::Gui Qt6::Core Qt6::Network)
+target_link_libraries(aseapp_native_ui PRIVATE Qt6::Widgets Qt6::Gui Qt6::Core Qt6::Network Qt6::OpenGLWidgets)
 
 configure_file(
   ${CMAKE_CURRENT_SOURCE_DIR}/src/aseapp_native_ui.rc.in
@@ -122,6 +131,11 @@ if(WIN32)
   if(DEFINED ENV{CONDA_PREFIX})
     file(TO_CMAKE_PATH "$ENV{CONDA_PREFIX}/Library/lib/qt6/plugins" ASEAPP_CONDA_QT_PLUGIN_DIR)
     list(APPEND ASEAPP_QT_PLUGIN_SEARCH_DIRS "${ASEAPP_CONDA_QT_PLUGIN_DIR}")
+  endif()
+  if(ASEAPP_QT_BIN_DIR)
+    list(APPEND ASEAPP_QT_PLUGIN_SEARCH_DIRS
+      "${ASEAPP_QT_BIN_DIR}/../plugins"
+    )
   endif()
   foreach(ASEAPP_PREFIX IN LISTS CMAKE_PREFIX_PATH)
     list(APPEND ASEAPP_QT_PLUGIN_SEARCH_DIRS
@@ -167,18 +181,51 @@ include(CTest)
 if(BUILD_TESTING)
   set(ASEAPP_TEST_ENV)
   set(ASEAPP_GUI_QT_TEST_ENV)
+  set(ASEAPP_TEST_PATH_PARTS)
+  if(WIN32 AND ASEAPP_QT_BIN_DIR)
+    file(TO_NATIVE_PATH "${ASEAPP_QT_BIN_DIR}" ASEAPP_TEST_QT_BIN)
+    list(APPEND ASEAPP_TEST_PATH_PARTS "${ASEAPP_TEST_QT_BIN}")
+  endif()
+  if(WIN32 AND Python3_EXECUTABLE)
+    get_filename_component(ASEAPP_TEST_PYTHON_ROOT "${Python3_EXECUTABLE}" DIRECTORY)
+    if(EXISTS "${ASEAPP_TEST_PYTHON_ROOT}/Library/bin")
+      file(TO_NATIVE_PATH "${ASEAPP_TEST_PYTHON_ROOT}/Library/bin" ASEAPP_TEST_PYTHON_LIBRARY_BIN)
+      list(APPEND ASEAPP_TEST_PATH_PARTS "${ASEAPP_TEST_PYTHON_LIBRARY_BIN}")
+    endif()
+    if(EXISTS "${ASEAPP_TEST_PYTHON_ROOT}/Scripts")
+      file(TO_NATIVE_PATH "${ASEAPP_TEST_PYTHON_ROOT}/Scripts" ASEAPP_TEST_PYTHON_SCRIPTS)
+      list(APPEND ASEAPP_TEST_PATH_PARTS "${ASEAPP_TEST_PYTHON_SCRIPTS}")
+    endif()
+    file(TO_NATIVE_PATH "${ASEAPP_TEST_PYTHON_ROOT}" ASEAPP_TEST_PYTHON_ROOT_NATIVE)
+    list(APPEND ASEAPP_TEST_PATH_PARTS "${ASEAPP_TEST_PYTHON_ROOT_NATIVE}")
+  endif()
   if(WIN32 AND DEFINED ENV{CONDA_PREFIX})
     file(TO_NATIVE_PATH "$ENV{CONDA_PREFIX}/Library/bin" ASEAPP_TEST_CONDA_LIBRARY_BIN)
     file(TO_NATIVE_PATH "$ENV{CONDA_PREFIX}" ASEAPP_TEST_CONDA_PREFIX)
     file(TO_NATIVE_PATH "$ENV{CONDA_PREFIX}/Scripts" ASEAPP_TEST_CONDA_SCRIPTS)
     file(TO_NATIVE_PATH "$ENV{CONDA_PREFIX}/Library/lib/qt6/plugins" ASEAPP_TEST_QT_PLUGIN_PATH)
-    set(ASEAPP_TEST_PATH "${ASEAPP_TEST_CONDA_LIBRARY_BIN};${ASEAPP_TEST_CONDA_PREFIX};${ASEAPP_TEST_CONDA_SCRIPTS};$ENV{PATH}")
-    string(REPLACE ";" "\\;" ASEAPP_TEST_PATH "${ASEAPP_TEST_PATH}")
-    set(ASEAPP_TEST_ENV "PATH=${ASEAPP_TEST_PATH}")
+    list(APPEND ASEAPP_TEST_PATH_PARTS
+      "${ASEAPP_TEST_CONDA_LIBRARY_BIN}"
+      "${ASEAPP_TEST_CONDA_PREFIX}"
+      "${ASEAPP_TEST_CONDA_SCRIPTS}"
+    )
     set(ASEAPP_GUI_QT_TEST_ENV
       "QT_PLUGIN_PATH=${ASEAPP_TEST_QT_PLUGIN_PATH}"
       "QT_QPA_PLATFORM=offscreen"
     )
+  endif()
+  if(WIN32 AND ASEAPP_QT_PLUGIN_DIR)
+    file(TO_NATIVE_PATH "${ASEAPP_QT_PLUGIN_DIR}" ASEAPP_TEST_QT_PLUGIN_PATH)
+    set(ASEAPP_GUI_QT_TEST_ENV
+      "QT_PLUGIN_PATH=${ASEAPP_TEST_QT_PLUGIN_PATH}"
+      "QT_QPA_PLATFORM=offscreen"
+    )
+  endif()
+  if(ASEAPP_TEST_PATH_PARTS)
+    list(APPEND ASEAPP_TEST_PATH_PARTS "$ENV{PATH}")
+    string(JOIN ";" ASEAPP_TEST_PATH ${ASEAPP_TEST_PATH_PARTS})
+    string(REPLACE ";" "\\;" ASEAPP_TEST_PATH "${ASEAPP_TEST_PATH}")
+    set(ASEAPP_TEST_ENV "PATH=${ASEAPP_TEST_PATH}")
   endif()
 
   add_executable(aseapp_adsorbate_pose_self_test
@@ -186,10 +233,26 @@ if(BUILD_TESTING)
     ${ASEAPP_NATIVE_UI_COMMON_SOURCES}
   )
   target_include_directories(aseapp_adsorbate_pose_self_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/src)
-  target_link_libraries(aseapp_adsorbate_pose_self_test PRIVATE Qt6::Widgets Qt6::Gui Qt6::Core)
+  target_link_libraries(aseapp_adsorbate_pose_self_test PRIVATE Qt6::Widgets Qt6::Gui Qt6::Core Qt6::OpenGLWidgets)
   set_target_properties(aseapp_adsorbate_pose_self_test PROPERTIES
     OUTPUT_NAME "ASEappAdsorbatePoseSelfTest"
   )
+  aseapp_prepare_windows_build_runtime(aseapp_adsorbate_pose_self_test)
+
+  add_executable(aseapp_canvas_performance_self_test
+    src/CanvasPerformanceSelfTestMain.cpp
+    src/StructureCanvas.cpp
+    src/StructureCanvas.h
+    src/ElementStyle.cpp
+    src/ElementStyle.h
+    src/StructureData.h
+  )
+  target_include_directories(aseapp_canvas_performance_self_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/src)
+  target_link_libraries(aseapp_canvas_performance_self_test PRIVATE Qt6::Widgets Qt6::Gui Qt6::Core Qt6::OpenGLWidgets)
+  set_target_properties(aseapp_canvas_performance_self_test PROPERTIES
+    OUTPUT_NAME "ASEappCanvasPerformanceSelfTest"
+  )
+  aseapp_prepare_windows_build_runtime(aseapp_canvas_performance_self_test)
 
   add_test(
     NAME adsorbate_pose_gui_self_test
@@ -420,7 +483,8 @@ if(WIN32)
       endif()
     endforeach()
     if(NOT ASEAPP_QT_RUNTIME_PATH)
-      message(FATAL_ERROR "Required Qt runtime DLL was not found: ${ASEAPP_QT_RUNTIME_DLL}")
+      message(STATUS "Optional Qt runtime DLL was not found; relying on Qt deploy tool: ${ASEAPP_QT_RUNTIME_DLL}")
+      continue()
     endif()
     install(FILES "${ASEAPP_QT_RUNTIME_PATH}"
       DESTINATION ${CMAKE_INSTALL_BINDIR}
