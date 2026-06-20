@@ -1,5 +1,6 @@
 ﻿#include "MainWindow.h"
 
+#include "DftInputGeneratorDialog.h"
 #include "ElementStyle.h"
 #include "StructureCanvas.h"
 #include "StructureFileLoader.h"
@@ -3459,9 +3460,13 @@ void MainWindow::buildUi() {
     connect(openButton, &QPushButton::clicked, this, &MainWindow::openStructure);
     auto* saveButton = new QPushButton("Save As...");
     connect(saveButton, &QPushButton::clicked, this, &MainWindow::saveStructureAs);
+    auto* dftInputButton = new QPushButton(m_japanese ? QStringLiteral("DFT入力生成...") : QStringLiteral("DFT input..."), fileGroup);
+    dftInputButton->setToolTip(m_japanese ? QStringLiteral("現在開いている構造からSIESTA/QE入力を生成します。") : QStringLiteral("Generate SIESTA/QE inputs from the current structure."));
+    connect(dftInputButton, &QPushButton::clicked, this, &MainWindow::showDftInputGenerator);
     fileLayout->addWidget(m_fileLabel);
     fileLayout->addWidget(openButton);
     fileLayout->addWidget(saveButton);
+    fileLayout->addWidget(dftInputButton);
     rightLayout->addWidget(fileGroup);
     makeCollapsibleGroup(fileGroup, QStringLiteral("file"), false);
 
@@ -3970,6 +3975,11 @@ void MainWindow::buildUi() {
     m_saveAction->setToolTip("Save the current structure to a file.");
     connect(m_saveAction, &QAction::triggered, this, &MainWindow::saveStructureAs);
     toolbar->addAction(m_saveAction);
+    m_dftInputAction = new QAction(m_japanese ? QStringLiteral("DFT入力") : QStringLiteral("DFT input"), this);
+    m_dftInputAction->setShortcut(QKeySequence("Ctrl+Alt+D"));
+    m_dftInputAction->setToolTip(m_japanese ? QStringLiteral("現在の構造からSIESTA/QE入力ファイルを生成します。") : QStringLiteral("Generate SIESTA/QE input files from the current structure."));
+    connect(m_dftInputAction, &QAction::triggered, this, &MainWindow::showDftInputGenerator);
+    toolbar->addAction(m_dftInputAction);
     m_exportLegendAction = new QAction(uiText(QStringLiteral("export_legend")), this);
     m_exportLegendAction->setShortcut(QKeySequence("Ctrl+Alt+L"));
     m_exportLegendAction->setToolTip(uiText(QStringLiteral("export_legend_tip")));
@@ -4074,6 +4084,7 @@ void MainWindow::buildUi() {
     fileMenu->addAction(m_closeTabAction);
     fileMenu->addSeparator();
     fileMenu->addAction(m_saveAction);
+    fileMenu->addAction(m_dftInputAction);
     fileMenu->addSeparator();
     fileMenu->addAction(m_exportLegendAction);
 
@@ -4622,6 +4633,17 @@ void MainWindow::openStructure() {
     const QString path = QFileDialog::getOpenFileName(this, "Open structure", defaultOpenDirectory(),
         "Structure files (*.aseproj *.json *.cif *.xyz *.extxyz *.vasp POSCAR CONTCAR *.poscar *.pdb *.xsf);;All files (*.*)");
     if (!path.isEmpty()) loadFromPathAsync(path);
+}
+
+void MainWindow::showDftInputGenerator() {
+    if (m_structure.atoms.empty()) {
+        QMessageBox::information(this, QStringLiteral("DFT入力生成"), m_japanese
+            ? QStringLiteral("先に構造ファイルを開いてください。")
+            : QStringLiteral("Open a structure file first."));
+        return;
+    }
+    DftInputGeneratorDialog dialog(m_structure, this);
+    dialog.exec();
 }
 
 void MainWindow::showUsageHelp() {
@@ -8545,7 +8567,9 @@ bool MainWindow::runAdsorbatePoseSelfTest(const QString& outputDirectory, QStrin
         return fail(QStringLiteral("POSCAR export wrote all-zero flags for movable atoms."));
     }
     loadError.clear();
-    const auto poscarRoundTrip = loader.load(directPoscarPath, &loadError);
+    StructureImportOptions poscarRoundTripOptions;
+    poscarRoundTripOptions.trailingFlagInterpretation = StructureTrailingFlagInterpretation::NumericOneMeansFixed;
+    const auto poscarRoundTrip = loader.load(directPoscarPath, &loadError, poscarRoundTripOptions);
     if (!poscarRoundTrip.has_value()) {
         return fail(loadError.isEmpty() ? QStringLiteral("Failed to reload written POSCAR.") : loadError);
     }
@@ -8553,7 +8577,7 @@ bool MainWindow::runAdsorbatePoseSelfTest(const QString& outputDirectory, QStrin
             && !poscarRoundTrip->atoms.front().movable[0]
             && !poscarRoundTrip->atoms.front().movable[1]
             && !poscarRoundTrip->atoms.front().movable[2],
-            QStringLiteral("VASP/POSCAR reload preserves numeric 1 1 1 fixed flags"))) {
+            QStringLiteral("VASP/POSCAR reload can explicitly preserve numeric 1 1 1 fixed flags"))) {
         return fail(QStringLiteral("Reloaded POSCAR did not preserve the fixed atom flags."));
     }
     const QString fractionalXyzPath = outputDir.filePath(QStringLiteral("coordinate_mode_fractional.xyz"));

@@ -41,6 +41,7 @@ protected:
 private slots:
     void openStructure();
     void saveStructureAs();
+    void showDftInputGenerator();
     void exportElementLegendImage();
     void showStartupGuide();
     void showUsageHelp();
@@ -214,6 +215,7 @@ private:
     QComboBox* m_posePreviewModeCombo = nullptr;
     QAction* m_openAction = nullptr;
     QAction* m_saveAction = nullptr;
+    QAction* m_dftInputAction = nullptr;
     QAction* m_newTabAction = nullptr;
     QAction* m_closeTabAction = nullptr;
     QAction* m_exportLegendAction = nullptr;

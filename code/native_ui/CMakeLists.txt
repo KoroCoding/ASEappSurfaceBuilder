@@ -72,11 +72,21 @@ set(ASEAPP_NATIVE_UI_COMMON_SOURCES
   src/StructureCanvas.h
   src/ElementStyle.cpp
   src/ElementStyle.h
+  src/DftInputGenerator.cpp
+  src/DftInputGenerator.h
+  src/DftInputGeneratorDialog.cpp
+  src/DftInputGeneratorDialog.h
+  src/DftInputParser.cpp
+  src/DftInputParser.h
+  src/DftInputTypes.h
+  src/DftParameterRegistry.cpp
+  src/DftParameterRegistry.h
   src/StructureFileLoader.cpp
   src/StructureFileLoader.h
   src/StructureData.h
   ${CMAKE_CURRENT_BINARY_DIR}/app_icons.qrc
   src/app_settings.qrc
+  src/dft_profiles.qrc
 )
 
 add_executable(aseapp_native_ui
@@ -254,6 +264,33 @@ if(BUILD_TESTING)
   )
   aseapp_prepare_windows_build_runtime(aseapp_canvas_performance_self_test)
 
+  add_executable(aseapp_dft_input_generator_self_test
+    src/DftInputGeneratorSelfTestMain.cpp
+    src/DftInputGenerator.cpp
+    src/DftInputGenerator.h
+    src/DftInputGeneratorDialog.cpp
+    src/DftInputGeneratorDialog.h
+    src/DftInputParser.cpp
+    src/DftInputParser.h
+    src/DftInputTypes.h
+    src/DftParameterRegistry.cpp
+    src/DftParameterRegistry.h
+    src/ElementStyle.cpp
+    src/ElementStyle.h
+    src/StructureData.h
+    src/StructureFileLoader.cpp
+    src/StructureFileLoader.h
+  )
+  target_include_directories(aseapp_dft_input_generator_self_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/src)
+  target_compile_definitions(aseapp_dft_input_generator_self_test PRIVATE
+    ASEAPP_NATIVE_UI_SOURCE_DIR="${CMAKE_CURRENT_SOURCE_DIR}"
+  )
+  target_link_libraries(aseapp_dft_input_generator_self_test PRIVATE Qt6::Widgets Qt6::Gui Qt6::Core)
+  set_target_properties(aseapp_dft_input_generator_self_test PROPERTIES
+    OUTPUT_NAME "ASEappDftInputGeneratorSelfTest"
+  )
+  aseapp_prepare_windows_build_runtime(aseapp_dft_input_generator_self_test)
+
   add_test(
     NAME adsorbate_pose_gui_self_test
     COMMAND $<TARGET_FILE:aseapp_adsorbate_pose_self_test>
@@ -281,10 +318,28 @@ if(BUILD_TESTING)
   if(ASEAPP_TEST_ENV)
     set_tests_properties(ase_extxyz_roundtrip PROPERTIES ENVIRONMENT "${ASEAPP_TEST_ENV}")
   endif()
+
+  add_test(
+    NAME dft_input_generator_self_test
+    COMMAND $<TARGET_FILE:aseapp_dft_input_generator_self_test>
+  )
+  set(ASEAPP_DFT_SELF_TEST_ENV)
+  if(ASEAPP_TEST_ENV)
+    list(APPEND ASEAPP_DFT_SELF_TEST_ENV "${ASEAPP_TEST_ENV}")
+  endif()
+  if(ASEAPP_GUI_QT_TEST_ENV)
+    list(APPEND ASEAPP_DFT_SELF_TEST_ENV ${ASEAPP_GUI_QT_TEST_ENV})
+  endif()
+  list(APPEND ASEAPP_DFT_SELF_TEST_ENV "ASEAPP_DFT_AUDIT_OUT=${CMAKE_CURRENT_BINARY_DIR}/dft_final_audit_samples")
+  set_tests_properties(dft_input_generator_self_test PROPERTIES
+    TIMEOUT 60
+    ENVIRONMENT "${ASEAPP_DFT_SELF_TEST_ENV}"
+  )
 endif()
 
 install(FILES README.txt QUICKSTART.txt CHANGELOG.txt DESTINATION .)
 install(PROGRAMS tools/uma_relax_worker.py DESTINATION tools)
+install(DIRECTORY assets/dft_profiles DESTINATION assets)
 
 if(APPLE)
   set(ASEAPP_MACOS_PUBLIC_CERT "${CMAKE_CURRENT_SOURCE_DIR}/certs/ASEappSurfaceBuilderLocalCodeSigning.cer")

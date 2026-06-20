@@ -1,0 +1,20 @@
+{
+  "code": "siesta",
+  "version": "4.1.5",
+  "profile_name": "Kangawa_GaN_surface",
+  "module_name": "siesta/4.1.5-mpi",
+  "syntax_profile": "siesta_fdf_4_1",
+  "include_xc_fdf": true,
+  "xc_fdf_path": "xc.fdf",
+  "standalone_inline": false,
+  "calculation_mode": "neutral_slab",
+  "parameters": {
+    "siesta.charge_spin.NetCharge": "0.0",
+    "siesta.charge_spin.Spin": "none",
+    "siesta.species.MeshCutoff": "410",
+    "siesta.species.xc.functional": "GGA",
+    "siesta.species.xc.authors": "PBEJsJrLO",
+    "siesta.kpoints.kgrid": "3 3 1"
+  },
+  "profile": "Kangawa_GaN_surface"
+}

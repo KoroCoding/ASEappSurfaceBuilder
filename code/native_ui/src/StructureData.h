@@ -1,8 +1,10 @@
-﻿#pragma once
+#pragma once
 
 #include <QColor>
-#include <QVector3D>
+#include <QMap>
 #include <QString>
+#include <QStringList>
+#include <QVector3D>
 #include <array>
 #include <vector>
 
@@ -23,5 +25,7 @@ struct StructureData {
     QString title;
     std::array<QVector3D, 3> cellVectors{};
     std::vector<NativeAtom> atoms;
+    QString trailingFlagInterpretation = QStringLiteral("preserve_or_ignore_unknown");
+    QMap<int, QStringList> importedExtraColumns;
     bool dirty = false;
 };

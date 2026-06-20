@@ -34,5 +34,14 @@
     "fmax": 0.05,
     "maxSteps": 500,
     "fixSelectiveAtoms": true
+  },
+  "dft": {
+    "lastCode": "siesta",
+    "lastSiestaVersion": "4.1.5",
+    "lastQeVersion": "7.3.1",
+    "profileFolders": [
+      "assets/dft_profiles",
+      "~/.aseapp/dft_profiles"
+    ]
   }
 }

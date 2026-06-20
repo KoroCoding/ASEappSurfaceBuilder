@@ -1,0 +1,23 @@
+{
+  "code": "qe",
+  "version": "7.3.1",
+  "profile_name": "Miyaguchi_GaN_charged_slab",
+  "executable": "pw.x",
+  "input_schema": "pw_7_3_1",
+  "calculation_mode": "charged_slab_electron_added",
+  "parameters": {
+    "qe.CONTROL.calculation": "relax",
+    "qe.SYSTEM.ecutwfc": "80",
+    "qe.SYSTEM.ecutrho": "320",
+    "qe.SYSTEM.degauss": "0.03",
+    "qe.SYSTEM.nspin": "2",
+    "qe.SYSTEM.tot_charge": "-0.25",
+    "qe.SYSTEM.assume_isolated": "2D",
+    "qe.ELECTRONS.conv_thr": "1.0d-5",
+    "qe.ELECTRONS.mixing_beta": "0.08",
+    "qe.ELECTRONS.mixing_ndim": "8",
+    "qe.ELECTRONS.diagonalization": "cg",
+    "qe.K_POINTS.automatic": "3 3 1 0 0 0"
+  },
+  "profile": "Miyaguchi_GaN_charged_slab"
+}

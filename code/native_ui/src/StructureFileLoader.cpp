@@ -70,7 +70,19 @@ double parseNumber(QString token, double fallback = 0.0) {
     return ok ? value : fallback;
 }
 
-bool parsePoscarMovableFlag(const QString& token, bool* movable) {
+QString trailingFlagInterpretationKey(StructureTrailingFlagInterpretation interpretation) {
+    switch (interpretation) {
+    case StructureTrailingFlagInterpretation::PreserveOrIgnoreUnknown: return QStringLiteral("preserve_or_ignore_unknown");
+    case StructureTrailingFlagInterpretation::IgnoreTrailingFlags: return QStringLiteral("ignore_trailing_flags");
+    case StructureTrailingFlagInterpretation::NumericOneMeansFixed: return QStringLiteral("numeric_one_means_fixed");
+    case StructureTrailingFlagInterpretation::NumericOneMeansMovable: return QStringLiteral("numeric_one_means_movable");
+    case StructureTrailingFlagInterpretation::VaspSelectiveDynamics: return QStringLiteral("vasp_selective_dynamics");
+    case StructureTrailingFlagInterpretation::CustomMapping: return QStringLiteral("custom_mapping");
+    }
+    return QStringLiteral("preserve_or_ignore_unknown");
+}
+
+bool parsePoscarTfMovableFlag(const QString& token, bool* movable) {
     if (movable == nullptr) {
         return false;
     }
@@ -83,13 +95,40 @@ bool parsePoscarMovableFlag(const QString& token, bool* movable) {
         *movable = false;
         return true;
     }
+    return false;
+}
+
+bool parsePoscarNumericMovableFlag(const QString& token, bool oneMeansMovable, bool* movable) {
+    if (movable == nullptr) {
+        return false;
+    }
+    const QString trimmed = token.trimmed();
     bool ok = false;
     const double value = trimmed.toDouble(&ok);
     if (!ok) {
         return false;
     }
-    *movable = std::abs(value) <= 0.5;
+    const bool numericOne = std::abs(value) > 0.5;
+    *movable = oneMeansMovable ? numericOne : !numericOne;
     return true;
+}
+
+bool parsePoscarMovableFlag(const QString& token, StructureTrailingFlagInterpretation interpretation,
+                            bool selectiveDynamics, bool* movable) {
+    switch (interpretation) {
+    case StructureTrailingFlagInterpretation::PreserveOrIgnoreUnknown:
+        return selectiveDynamics && parsePoscarTfMovableFlag(token, movable);
+    case StructureTrailingFlagInterpretation::IgnoreTrailingFlags:
+    case StructureTrailingFlagInterpretation::CustomMapping:
+        return false;
+    case StructureTrailingFlagInterpretation::NumericOneMeansFixed:
+        return parsePoscarTfMovableFlag(token, movable) || parsePoscarNumericMovableFlag(token, false, movable);
+    case StructureTrailingFlagInterpretation::NumericOneMeansMovable:
+        return parsePoscarTfMovableFlag(token, movable) || parsePoscarNumericMovableFlag(token, true, movable);
+    case StructureTrailingFlagInterpretation::VaspSelectiveDynamics:
+        return parsePoscarTfMovableFlag(token, movable);
+    }
+    return false;
 }
 
 QVector3D jsonVector(const QJsonArray& array) {
@@ -903,7 +942,7 @@ std::optional<StructureData> loadCif(const QString& path, QString* errorMessage)
     return data;
 }
 
-std::optional<StructureData> loadPoscar(const QString& path, QString* errorMessage) {
+std::optional<StructureData> loadPoscar(const QString& path, QString* errorMessage, const StructureImportOptions& options) {
     const QString text = readUtf8NoBom(path, errorMessage);
     if (text.isEmpty()) {
         return std::nullopt;
@@ -917,6 +956,7 @@ std::optional<StructureData> loadPoscar(const QString& path, QString* errorMessa
     StructureData data;
     data.sourcePath = path;
     data.title = lines.at(0).trimmed();
+    data.trailingFlagInterpretation = trailingFlagInterpretationKey(options.trailingFlagInterpretation);
     const double scale = parseNumber(lines.at(1).trimmed(), 1.0);
     for (int i = 0; i < 3; ++i) {
         const auto vec = tokenizeRespectingQuotes(lines.at(2 + i));
@@ -1004,11 +1044,12 @@ std::optional<StructureData> loadPoscar(const QString& path, QString* errorMessa
                 atom.fractional = solveFractional(data.cellVectors, atom.cartesian);
             }
             if (parts.size() >= 6) {
+                data.importedExtraColumns.insert(atom.atomId, parts.mid(3));
                 std::array<bool, 3> movable = atom.movable;
                 bool parsedFlags = true;
                 for (int axis = 0; axis < 3; ++axis) {
                     bool parsedMovable = true;
-                    if (!parsePoscarMovableFlag(parts.at(3 + axis), &parsedMovable)) {
+                    if (!parsePoscarMovableFlag(parts.at(3 + axis), options.trailingFlagInterpretation, selectiveDynamics, &parsedMovable)) {
                         parsedFlags = false;
                         break;
                     }
@@ -1186,6 +1227,10 @@ QString suffixForPath(const QString& path) {
 StructureFileLoader::StructureFileLoader(QObject* parent) : QObject(parent) {}
 
 std::optional<StructureData> StructureFileLoader::load(const QString& path, QString* errorMessage) const {
+    return load(path, errorMessage, StructureImportOptions{});
+}
+
+std::optional<StructureData> StructureFileLoader::load(const QString& path, QString* errorMessage, const StructureImportOptions& options) const {
     const QString suffix = suffixForPath(path);
     if (suffix == "aseproj" || suffix == "json" || suffix == "vesta") {
         return loadAseprojLike(path, errorMessage);
@@ -1197,7 +1242,7 @@ std::optional<StructureData> StructureFileLoader::load(const QString& path, QStr
         return loadCif(path, errorMessage);
     }
     if (suffix == "vasp" || suffix == "poscar" || suffix == "contcar") {
-        return loadPoscar(path, errorMessage);
+        return loadPoscar(path, errorMessage, options);
     }
     if (suffix == "pdb") {
         return loadPdb(path, errorMessage);
