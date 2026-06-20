@@ -14,7 +14,7 @@ struct NativeAtom {
     QVector3D cartesian;
     QColor color;
     double radius = 1.0;
-    // VASP Selective dynamics flags. true = movable (T), false = fixed (F).
+    // Per-axis mobility flags. true = movable, false = fixed.
     std::array<bool, 3> movable{true, true, true};
 };
 

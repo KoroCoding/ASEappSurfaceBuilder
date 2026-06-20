@@ -66,6 +66,8 @@ private slots:
     void finishSelectedAtomTranslation();
     void clearSelection();
     void deleteSelectedAtoms();
+    void fixSelectedAtoms();
+    void unfixSelectedAtoms();
     void undoEdit();
     void redoEdit();
     void showMeasurementReport();
@@ -82,7 +84,6 @@ private slots:
     void exportPoseXyz();
     void exportPoseJson();
     void exportPoseSnippet();
-    void editBondDistances();
     void editElementPairBondLengths();
     void syncCanvasDisplayOptions();
 
@@ -173,6 +174,7 @@ private:
     QString describePlacementRule(const SurfacePlacementRule& rule) const;
     QString supercellStatusText() const;
     void setSelectedAtomIds(const std::vector<int>& atomIds);
+    void setSelectedAtomsFixed(bool fixed);
     EditSnapshot captureEditSnapshot() const;
     void restoreEditSnapshot(const EditSnapshot& snapshot, bool forceDirty);
     void pushUndoState(const QString& label);
@@ -266,6 +268,8 @@ private:
     QPushButton* m_openPresetButton = nullptr;
     QPushButton* m_clearSelectionButton = nullptr;
     QPushButton* m_deleteSelectedButton = nullptr;
+    QPushButton* m_fixSelectedButton = nullptr;
+    QPushButton* m_unfixSelectedButton = nullptr;
     QPushButton* m_savePrecursorButton = nullptr;
     QPushButton* m_loadPrecursorButton = nullptr;
     QPushButton* m_placePrecursorButton = nullptr;

@@ -70,6 +70,28 @@ double parseNumber(QString token, double fallback = 0.0) {
     return ok ? value : fallback;
 }
 
+bool parsePoscarMovableFlag(const QString& token, bool* movable) {
+    if (movable == nullptr) {
+        return false;
+    }
+    const QString trimmed = token.trimmed();
+    if (trimmed.startsWith(QLatin1Char('T'), Qt::CaseInsensitive)) {
+        *movable = true;
+        return true;
+    }
+    if (trimmed.startsWith(QLatin1Char('F'), Qt::CaseInsensitive)) {
+        *movable = false;
+        return true;
+    }
+    bool ok = false;
+    const double value = trimmed.toDouble(&ok);
+    if (!ok) {
+        return false;
+    }
+    *movable = std::abs(value) <= 0.5;
+    return true;
+}
+
 QVector3D jsonVector(const QJsonArray& array) {
     return QVector3D(
         static_cast<float>(array.at(0).toDouble()),
@@ -981,9 +1003,19 @@ std::optional<StructureData> loadPoscar(const QString& path, QString* errorMessa
                 atom.cartesian = vec * static_cast<float>(scale);
                 atom.fractional = solveFractional(data.cellVectors, atom.cartesian);
             }
-            if (selectiveDynamics && parts.size() >= 6) {
+            if (parts.size() >= 6) {
+                std::array<bool, 3> movable = atom.movable;
+                bool parsedFlags = true;
                 for (int axis = 0; axis < 3; ++axis) {
-                    atom.movable[static_cast<std::size_t>(axis)] = parts.at(3 + axis).trimmed().startsWith('T', Qt::CaseInsensitive);
+                    bool parsedMovable = true;
+                    if (!parsePoscarMovableFlag(parts.at(3 + axis), &parsedMovable)) {
+                        parsedFlags = false;
+                        break;
+                    }
+                    movable[static_cast<std::size_t>(axis)] = parsedMovable;
+                }
+                if (parsedFlags) {
+                    atom.movable = movable;
                 }
             }
             data.atoms.push_back(atom);
@@ -1178,6 +1210,3 @@ std::optional<StructureData> StructureFileLoader::load(const QString& path, QStr
     }
     return std::nullopt;
 }
-
-
-

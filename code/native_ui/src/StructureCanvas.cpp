@@ -40,8 +40,6 @@ constexpr double kBondWidthPixels = 2.8;
 constexpr double kPreviewBondWidthPixels = 2.4;
 constexpr double kPickIndexCellSize = 48.0;
 constexpr int kGpuSinglePickAtomLimit = 20000;
-constexpr int kGpuRectPickAtomLimit = 12000;
-constexpr double kGpuRectPickPixelLimit = 180000.0;
 
 qint64 screenGridKey(int x, int y) {
     return (static_cast<qint64>(x) << 32) ^ static_cast<quint32>(y);
@@ -2080,60 +2078,18 @@ std::vector<int> StructureCanvas::pickAtomsInScreenRect(const QRectF& selection)
         return {};
     }
     const QRectF normalizedSelection = selection.normalized().intersected(QRectF(rect()));
-    const double selectionPixelArea = normalizedSelection.width() * normalizedSelection.height();
-    const bool useGpuRectPick =
-        !normalizedSelection.isEmpty()
-        && static_cast<int>(m_structure.atoms.size()) <= kGpuRectPickAtomLimit
-        && selectionPixelArea <= kGpuRectPickPixelLimit
-        && m_openGL != nullptr
-        && context() != nullptr;
-    if (useGpuRectPick) {
-        makeCurrent();
-        if (!m_openGL->initialized) {
-            m_openGL->initialize(this);
-        }
-        if (m_openGL->initialized) {
-            if (m_atomRenderInstancesDirty) {
-                m_openGL->uploadAtoms(m_atomRenderInstances);
-                m_atomRenderInstancesDirty = false;
-            }
-            const QSize pickSize = size();
-            const GpuViewState view = currentGpuViewState();
-            if (m_openGL->renderPickAtoms(this, view, pickSize)) {
-                const int x = std::clamp(static_cast<int>(std::floor(normalizedSelection.left())), 0, std::max(0, pickSize.width() - 1));
-                const int yTop = std::clamp(static_cast<int>(std::floor(normalizedSelection.top())), 0, std::max(0, pickSize.height() - 1));
-                const int x2 = std::clamp(static_cast<int>(std::ceil(normalizedSelection.right())), 0, std::max(0, pickSize.width() - 1));
-                const int yBottom = std::clamp(static_cast<int>(std::ceil(normalizedSelection.bottom())), 0, std::max(0, pickSize.height() - 1));
-                const int readWidth = std::max(1, x2 - x + 1);
-                const int readHeight = std::max(1, yBottom - yTop + 1);
-                std::vector<unsigned char> pixels(static_cast<std::size_t>(readWidth * readHeight * 4), 0);
-                glPixelStorei(GL_PACK_ALIGNMENT, 1);
-                glReadPixels(x, pickSize.height() - yBottom - 1, readWidth, readHeight, GL_RGBA, GL_UNSIGNED_BYTE, pixels.data());
-                m_openGL->finishPickRender(this);
-                doneCurrent();
-
-                std::vector<int> atomIds;
-                std::unordered_set<int> seen;
-                seen.reserve(static_cast<std::size_t>(readWidth * readHeight / 8 + 8));
-                for (int row = 0; row < readHeight; ++row) {
-                    for (int col = 0; col < readWidth; ++col) {
-                        const auto offset = static_cast<std::size_t>((row * readWidth + col) * 4);
-                        const int atomId = decodePickColor(pixels.data() + offset);
-                        if (atomId > 0 && seen.insert(atomId).second) {
-                            atomIds.push_back(atomId);
-                        }
-                    }
-                }
-                std::sort(atomIds.begin(), atomIds.end());
-                return atomIds;
-            }
-        }
-        doneCurrent();
-    }
     if (m_pickIndexDirty || m_pickIndexCanvasSize != size()) {
         rebuildPickIndex();
     }
     const QRectF selectionTarget = normalizedSelection.isEmpty() ? selection.normalized() : normalizedSelection;
+    const auto atomCircleIntersectsSelection = [](const QRectF& target, const QPointF& center, double radius) {
+        const double closestX = std::clamp(center.x(), target.left(), target.right());
+        const double closestY = std::clamp(center.y(), target.top(), target.bottom());
+        const double dx = center.x() - closestX;
+        const double dy = center.y() - closestY;
+        const double effectiveRadius = std::max(0.0, radius);
+        return dx * dx + dy * dy <= effectiveRadius * effectiveRadius;
+    };
     const int minX = screenGridCoord(selectionTarget.left());
     const int maxX = screenGridCoord(selectionTarget.right());
     const int minY = screenGridCoord(selectionTarget.top());
@@ -2160,7 +2116,7 @@ std::vector<int> StructureCanvas::pickAtomsInScreenRect(const QRectF& selection)
                 }
                 visited[static_cast<std::size_t>(entryIndex)] = 1;
                 const auto& entry = m_pickIndexEntries[static_cast<std::size_t>(entryIndex)];
-                if (!selectionTarget.contains(entry.point)) {
+                if (!atomCircleIntersectsSelection(selectionTarget, entry.point, entry.radius)) {
                     continue;
                 }
                 candidates.push_back({entry.atomId, entry.depth});
@@ -2572,9 +2528,9 @@ void StructureCanvas::addAtomsInCtrlSelectionRect() {
     if (selection.isEmpty() || (selection.width() < 4 && selection.height() < 4)) {
         return;
     }
-    // Range selection follows the visible blue rectangle exactly.  Do not
-    // expand by atom radius/tolerance here: that made atoms just above the
-    // drawn rectangle get selected.
+    // Range selection uses the visible blue rectangle as the target and picks
+    // every projected atom circle that intersects it, including overlapped rear
+    // atoms hidden behind a front atom.
     const QRectF selectionTarget = QRectF(selection);
 
     const std::vector<int> candidates = pickAtomsInScreenRect(selectionTarget);
