@@ -28,6 +28,8 @@ public:
         bool showOutsideCell = true;
         bool showAxes = true;
         bool showLabels = false;
+        // Keep fixed-axis constraints visible without changing atom geometry.
+        bool highlightFixedAtoms = true;
         bool perspective = false;
         bool depthCue = false;
         double atomScale = 1.0;

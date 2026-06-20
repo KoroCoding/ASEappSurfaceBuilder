@@ -250,6 +250,27 @@ double hitAtomRadius(const NativeAtom& atom, double scale, double perspective, d
     return std::max(8.0, screenAtomRadius(atom, scale, perspective, atomScale, densityScale) + 2.0);
 }
 
+bool atomHasFixedAxisForOverlay(const NativeAtom& atom) {
+    return std::any_of(atom.movable.begin(), atom.movable.end(), [](bool movable) {
+        return !movable;
+    });
+}
+
+QString fixedAxisBadgeText(const NativeAtom& atom) {
+    if (!atomHasFixedAxisForOverlay(atom)) {
+        return {};
+    }
+    if (!atom.movable[0] && !atom.movable[1] && !atom.movable[2]) {
+        return QStringLiteral("FIX");
+    }
+
+    QString axes;
+    if (!atom.movable[0]) axes += QLatin1Char('x');
+    if (!atom.movable[1]) axes += QLatin1Char('y');
+    if (!atom.movable[2]) axes += QLatin1Char('z');
+    return QStringLiteral("F:%1").arg(axes);
+}
+
 bool distanceInRange(double distance, const BondDistanceRange& range) {
     if (distance < kMinimumPhysicalAtomDistance) {
         return false;
@@ -2305,15 +2326,17 @@ void StructureCanvas::paintGL() {
         QColor color;
         bool focus = false;
         bool selected = false;
+        bool fixed = false;
         bool preview = false;
         bool outOfCell = false;
         int atomId = 0;
         int selectionOrder = 0;
         QString label;
+        QString fixedLabel;
     };
 
     std::vector<PaintedAtom> overlayAtoms;
-    overlayAtoms.reserve(m_selectedAtomIds.size() + m_previewAtoms.size() + 4);
+    overlayAtoms.reserve(m_selectedAtomIds.size() + m_previewAtoms.size() + (m_displayOptions.highlightFixedAtoms ? m_structure.atoms.size() : 4));
     const QVector3D center = sceneCenter();
     const double scale = sceneScale(viewport, center);
     constexpr double densityScale = 1.0;
@@ -2323,12 +2346,13 @@ void StructureCanvas::paintGL() {
             viewport.center().x() + m_panOffset.x() + rotated.x() * scale * perspective,
             viewport.center().y() + m_panOffset.y() - rotated.y() * scale * perspective);
     };
-    const auto addOverlayAtom = [&](const NativeAtom& atom, const QVector3D& cartesian, bool selected, bool focus, bool preview, bool outOfCell, int order, const QString& label) {
+    const auto addOverlayAtom = [&](const NativeAtom& atom, const QVector3D& cartesian, bool selected, bool focus, bool fixed, bool preview, bool outOfCell, int order, const QString& label, const QString& fixedLabel) {
         const QVector3D rotated = rotatePoint(cartesian - center);
         const double perspective = depthPerspective(rotated.z());
         const QPointF point = projectRotatedPoint(rotated, perspective);
         const double radius = screenAtomRadius(atom, scale, perspective, m_displayOptions.atomScale, densityScale);
-        if (!QRectF(point.x() - radius - 16.0, point.y() - radius - 16.0, radius * 2.0 + 32.0, radius * 2.0 + 32.0).intersects(cullRect)) {
+        const double overlayPadding = fixed ? 42.0 : 16.0;
+        if (!QRectF(point.x() - radius - overlayPadding, point.y() - radius - overlayPadding, radius * 2.0 + overlayPadding * 2.0, radius * 2.0 + overlayPadding * 2.0).intersects(cullRect)) {
             return;
         }
         overlayAtoms.push_back({
@@ -2338,15 +2362,17 @@ void StructureCanvas::paintGL() {
             atom.color.isValid() ? atom.color : QColor("#C9D3E6"),
             focus,
             selected,
+            fixed,
             preview,
             outOfCell,
             atom.atomId,
             order,
-            label
+            label,
+            fixedLabel
         });
     };
 
-    if (!m_selectedAtomOrder.isEmpty() || m_focusAtomId > 0) {
+    if (m_displayOptions.highlightFixedAtoms || !m_selectedAtomOrder.isEmpty() || m_focusAtomId > 0) {
         for (const auto& image : m_cachedAtomImages) {
             if (image.atom < 0 || image.atom >= static_cast<int>(m_structure.atoms.size())) {
                 continue;
@@ -2358,7 +2384,8 @@ void StructureCanvas::paintGL() {
             const int order = m_selectedAtomOrder.value(atom.atomId, 0);
             const bool selected = order > 0;
             const bool focus = atom.atomId == m_focusAtomId;
-            if (!selected && !focus) {
+            const bool fixed = m_displayOptions.highlightFixedAtoms && atomHasFixedAxisForOverlay(atom);
+            if (!selected && !focus && !fixed) {
                 continue;
             }
             addOverlayAtom(
@@ -2366,10 +2393,12 @@ void StructureCanvas::paintGL() {
                 atom.cartesian,
                 selected,
                 focus,
+                fixed,
                 false,
                 false,
                 order,
-                atom.tag.trimmed().isEmpty() ? QString("%1%2").arg(atom.element).arg(atom.atomId) : atom.tag);
+                atom.tag.trimmed().isEmpty() ? QString("%1%2").arg(atom.element).arg(atom.atomId) : atom.tag,
+                fixed ? fixedAxisBadgeText(atom) : QString());
         }
     }
 
@@ -2379,10 +2408,12 @@ void StructureCanvas::paintGL() {
             atom.cartesian,
             false,
             false,
+            false,
             true,
             !fractionalInsideUnitCell(atom.fractional),
             0,
-            atom.tag);
+            atom.tag,
+            QString());
     }
 
     std::sort(overlayAtoms.begin(), overlayAtoms.end(), [](const PaintedAtom& a, const PaintedAtom& b) {
@@ -2415,6 +2446,29 @@ void StructureCanvas::paintGL() {
                     font);
             }
             continue;
+        }
+
+        if (atom.fixed) {
+            const QColor fixedAccent("#FF7A00");
+            painter.setPen(QPen(fixedAccent, atom.focus ? 3.0 : 2.4, Qt::DashLine));
+            painter.setBrush(Qt::NoBrush);
+            painter.drawEllipse(atom.pos, atom.radius + 11.0, atom.radius + 11.0);
+
+            const QString badgeText = atom.fixedLabel.trimmed().isEmpty() ? QStringLiteral("FIX") : atom.fixedLabel.trimmed();
+            QFont badgeFont = painter.font();
+            badgeFont.setBold(true);
+            badgeFont.setPointSizeF(std::clamp(atom.radius * 0.18, 7.0, 10.0));
+            painter.setFont(badgeFont);
+            const QFontMetricsF metrics(badgeFont);
+            const double badgeHeight = std::clamp(metrics.height() + 5.0, 15.0, 20.0);
+            const double badgeWidth = std::clamp(metrics.horizontalAdvance(badgeText) + 10.0, 26.0, 42.0);
+            const QPointF badgeTopLeft = atom.pos + QPointF(-atom.radius - 9.0, -atom.radius - badgeHeight - 5.0);
+            const QRectF badgeRect(badgeTopLeft, QSizeF(badgeWidth, badgeHeight));
+            painter.setPen(QPen(QColor("#8A3B00"), 1.0));
+            painter.setBrush(QColor("#FFB84D"));
+            painter.drawRoundedRect(badgeRect, 5.0, 5.0);
+            painter.setPen(QColor("#2A1600"));
+            painter.drawText(badgeRect, Qt::AlignCenter, badgeText);
         }
 
         if (atom.selected) {

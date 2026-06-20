@@ -19,6 +19,7 @@
       "showOutsideCell": true,
       "showAxes": true,
       "showLabels": false,
+      "highlightFixedAtoms": true,
       "perspective": false,
       "depthCue": false,
       "atomScalePercent": 100.0

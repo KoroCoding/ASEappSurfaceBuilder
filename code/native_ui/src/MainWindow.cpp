@@ -3258,6 +3258,8 @@ QString MainWindow::uiText(const QString& key) const {
         if (key == "element_pair_bond_lengths_tip") return QStringLiteral("Ga-Ga、Ga-N、N-N など元素ペアごとの表示ボンド距離を表で設定し、OK 時にまとめて反映します。");
         if (key == "axes") return QStringLiteral("軸");
         if (key == "labels") return QStringLiteral("ラベル");
+        if (key == "highlight_fixed_atoms") return QStringLiteral("固定強調");
+        if (key == "highlight_fixed_atoms_tip") return QStringLiteral("固定軸のある原子に橙色リングと FIX/軸バッジを表示します。");
         if (key == "perspective") return QStringLiteral("透視投影");
         if (key == "depth_cue") return QStringLiteral("奥行き");
         if (key == "right_place_tip") return QStringLiteral("左クリックで単一選択、Ctrl+左クリック/ドラッグで重なった奥の原子も追加選択できます。Escで選択解除できます。");
@@ -3353,6 +3355,8 @@ QString MainWindow::uiText(const QString& key) const {
         if (key == "element_pair_bond_lengths_tip") return QStringLiteral("Set displayed bond distances by element pair, such as Ga-Ga, Ga-N, or N-N; OK applies all changes at once.");
         if (key == "axes") return QStringLiteral("Axes");
         if (key == "labels") return QStringLiteral("Labels");
+        if (key == "highlight_fixed_atoms") return QStringLiteral("Fixed highlight");
+        if (key == "highlight_fixed_atoms_tip") return QStringLiteral("Show an orange ring and FIX/axis badge on atoms with fixed axes.");
         if (key == "perspective") return QStringLiteral("Perspective");
         if (key == "depth_cue") return QStringLiteral("Depth cue");
         if (key == "right_place_tip") return QStringLiteral("Select targets with left click or Ctrl+left click/drag, including overlapped rear atoms. Esc clears selection.");
@@ -3888,11 +3892,14 @@ void MainWindow::buildUi() {
     m_showAxesCheck->setChecked(displayStartupSetting(QStringLiteral("showAxes"), true));
     m_showLabelsCheck = new QCheckBox(uiText(QStringLiteral("labels")));
     m_showLabelsCheck->setChecked(displayStartupSetting(QStringLiteral("showLabels"), false));
+    m_highlightFixedAtomsCheck = new QCheckBox(uiText(QStringLiteral("highlight_fixed_atoms")));
+    m_highlightFixedAtomsCheck->setChecked(displayStartupSetting(QStringLiteral("highlightFixedAtoms"), true));
+    m_highlightFixedAtomsCheck->setToolTip(uiText(QStringLiteral("highlight_fixed_atoms_tip")));
     m_perspectiveCheck = new QCheckBox(uiText(QStringLiteral("perspective")));
     m_perspectiveCheck->setChecked(displayStartupSetting(QStringLiteral("perspective"), false));
     m_depthCueCheck = new QCheckBox(uiText(QStringLiteral("depth_cue")));
     m_depthCueCheck->setChecked(displayStartupSetting(QStringLiteral("depthCue"), false));
-    for (auto* check : {m_showCellCheck, m_showBondsCheck, m_showOutsideCellCheck, m_showAxesCheck, m_showLabelsCheck, m_perspectiveCheck, m_depthCueCheck}) {
+    for (auto* check : {m_showCellCheck, m_showBondsCheck, m_showOutsideCellCheck, m_showAxesCheck, m_showLabelsCheck, m_highlightFixedAtomsCheck, m_perspectiveCheck, m_depthCueCheck}) {
         displayLayout->addWidget(check);
         connect(check, &QCheckBox::toggled, this, &MainWindow::syncCanvasDisplayOptions);
     }
@@ -4044,6 +4051,10 @@ void MainWindow::buildUi() {
     m_showLabelsAction->setToolTip("Show or hide atom labels.");
     connect(m_showLabelsAction, &QAction::toggled, m_showLabelsCheck, &QCheckBox::setChecked);
     connect(m_showLabelsCheck, &QCheckBox::toggled, m_showLabelsAction, &QAction::setChecked);
+    m_highlightFixedAtomsAction = toolbar->addAction(uiText(QStringLiteral("highlight_fixed_atoms"))); m_highlightFixedAtomsAction->setCheckable(true); m_highlightFixedAtomsAction->setChecked(m_highlightFixedAtomsCheck != nullptr ? m_highlightFixedAtomsCheck->isChecked() : true);
+    m_highlightFixedAtomsAction->setToolTip(uiText(QStringLiteral("highlight_fixed_atoms_tip")));
+    connect(m_highlightFixedAtomsAction, &QAction::toggled, m_highlightFixedAtomsCheck, &QCheckBox::setChecked);
+    connect(m_highlightFixedAtomsCheck, &QCheckBox::toggled, m_highlightFixedAtomsAction, &QAction::setChecked);
     m_perspectiveAction = toolbar->addAction(uiText(QStringLiteral("perspective"))); m_perspectiveAction->setCheckable(true); m_perspectiveAction->setChecked(m_perspectiveCheck != nullptr ? m_perspectiveCheck->isChecked() : false);
     m_perspectiveAction->setToolTip("Toggle perspective projection.");
     connect(m_perspectiveAction, &QAction::toggled, m_perspectiveCheck, &QCheckBox::setChecked);
@@ -4192,6 +4203,7 @@ void MainWindow::buildUi() {
     viewMenu->addAction(m_showOutsideCellAction);
     viewMenu->addAction(m_showAxesAction);
     viewMenu->addAction(m_showLabelsAction);
+    viewMenu->addAction(m_highlightFixedAtomsAction);
     viewMenu->addSeparator();
     viewMenu->addAction(m_perspectiveAction);
     viewMenu->addAction(m_depthCueAction);
@@ -4664,6 +4676,7 @@ void MainWindow::showAppSettingsDialog() {
         {QStringLiteral("showOutsideCell"), uiText(QStringLiteral("outside_cell"))},
         {QStringLiteral("showAxes"), uiText(QStringLiteral("axes"))},
         {QStringLiteral("showLabels"), uiText(QStringLiteral("labels"))},
+        {QStringLiteral("highlightFixedAtoms"), uiText(QStringLiteral("highlight_fixed_atoms"))},
         {QStringLiteral("perspective"), uiText(QStringLiteral("perspective"))},
         {QStringLiteral("depthCue"), uiText(QStringLiteral("depth_cue"))},
     };
@@ -4827,6 +4840,7 @@ void MainWindow::showAppSettingsDialog() {
     if (m_showOutsideCellCheck != nullptr) m_showOutsideCellCheck->setChecked(displayChecks.value(QStringLiteral("showOutsideCell"))->isChecked());
     if (m_showAxesCheck != nullptr) m_showAxesCheck->setChecked(displayChecks.value(QStringLiteral("showAxes"))->isChecked());
     if (m_showLabelsCheck != nullptr) m_showLabelsCheck->setChecked(displayChecks.value(QStringLiteral("showLabels"))->isChecked());
+    if (m_highlightFixedAtomsCheck != nullptr) m_highlightFixedAtomsCheck->setChecked(displayChecks.value(QStringLiteral("highlightFixedAtoms"))->isChecked());
     if (m_perspectiveCheck != nullptr) m_perspectiveCheck->setChecked(displayChecks.value(QStringLiteral("perspective"))->isChecked());
     if (m_depthCueCheck != nullptr) m_depthCueCheck->setChecked(displayChecks.value(QStringLiteral("depthCue"))->isChecked());
     if (m_atomScaleSpin != nullptr) m_atomScaleSpin->setValue(atomScale->value());
@@ -7023,6 +7037,7 @@ void MainWindow::syncCanvasDisplayOptions() {
     options.showOutsideCell = m_showOutsideCellCheck->isChecked();
     options.showAxes = m_showAxesCheck->isChecked();
     options.showLabels = m_showLabelsCheck->isChecked();
+    options.highlightFixedAtoms = m_highlightFixedAtomsCheck->isChecked();
     options.perspective = m_perspectiveCheck->isChecked();
     options.depthCue = m_depthCueCheck->isChecked();
     options.atomScale = m_atomScaleSpin->value() / 100.0;
@@ -7036,6 +7051,7 @@ void MainWindow::syncCanvasDisplayOptions() {
     setDisplayStartupSetting(QStringLiteral("showOutsideCell"), options.showOutsideCell);
     setDisplayStartupSetting(QStringLiteral("showAxes"), options.showAxes);
     setDisplayStartupSetting(QStringLiteral("showLabels"), options.showLabels);
+    setDisplayStartupSetting(QStringLiteral("highlightFixedAtoms"), options.highlightFixedAtoms);
     setDisplayStartupSetting(QStringLiteral("perspective"), options.perspective);
     setDisplayStartupSetting(QStringLiteral("depthCue"), options.depthCue);
     setDisplayStartupDoubleSetting(QStringLiteral("atomScalePercent"), m_atomScaleSpin->value());
