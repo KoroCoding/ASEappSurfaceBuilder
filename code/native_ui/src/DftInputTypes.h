@@ -107,6 +107,7 @@ struct DftSiestaSpecies {
     QString label;
     QString element;
     QString role;
+    QString pseudopotential;
 };
 
 struct DftQeSpecies {
@@ -176,6 +177,13 @@ struct DftGeneratedInput {
     QStringList warnings;
     QStringList errors;
     QStringList requiredCompanionFiles;
+};
+
+struct DftScientificChecklistItem {
+    QString group;
+    QString item;
+    QString status;
+    QString detail;
 };
 
 inline QString dftCodeToString(DftCode code) {

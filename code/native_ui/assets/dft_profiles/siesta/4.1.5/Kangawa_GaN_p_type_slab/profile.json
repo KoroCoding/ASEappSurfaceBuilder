@@ -1,0 +1,281 @@
+{
+  "schema_version": "aseapp.dft_profile.v1",
+  "code": "siesta",
+  "version": "4.1.5",
+  "module_name": "siesta/4.1.5-mpi",
+  "syntax_profile": "siesta_fdf_4_1",
+  "executable_schema": "fdf",
+  "material": "GaN",
+  "structure_type": "surface_slab",
+  "profile_family": "Kangawa_GaN_SIESTA_surface",
+  "profile_sources": [
+    "Kempisty shared SIESTA xc.fdf is included by the main FDF by default; PSF files are resolved from ../potential on the supercomputer",
+    "Miyaguchi/Kangawa slab convention: bottom pseudo-H + bottom molecular layer fixed, slab k-grid 3x3x1",
+    "ChatGPT Pro conversation: neutral baseline first, then explicit fixed-charge n/p profiles when requested",
+    "ASEapp existing charged-slab convention: NetCharge -0.25 for electron addition and +0.25 for electron removal"
+  ],
+  "include_xc_fdf": {
+    "default": true,
+    "xc_include_file": "xc.fdf",
+    "include_position": "main_fdf_include_line"
+  },
+  "standalone_inline": {
+    "supported": true,
+    "default": false,
+    "requires_blocks": [
+      "ChemicalSpeciesLabel",
+      "PAO.Basis",
+      "PS.lmax",
+      "SyntheticAtoms"
+    ]
+  },
+  "companion_files": [
+    "../potential/Ga.psf",
+    "../potential/N.psf",
+    "../potential/H.psf",
+    "../potential/H-0.750.psf",
+    "../potential/H-1.250.psf"
+  ],
+  "species_mapping": {
+    "1": {
+      "label": "H-0.750",
+      "atomic_number": 201,
+      "role": "bottom_pseudo_h_n_terminated_0p75",
+      "pseudopotential": "H-0.750.psf"
+    },
+    "2": {
+      "label": "N",
+      "atomic_number": 7,
+      "role": "anion",
+      "pseudopotential": "N.psf"
+    },
+    "3": {
+      "label": "Ga",
+      "atomic_number": 31,
+      "role": "cation",
+      "pseudopotential": "Ga.psf"
+    },
+    "4": {
+      "label": "H",
+      "atomic_number": 1,
+      "role": "ordinary_hydrogen",
+      "pseudopotential": "H.psf"
+    },
+    "5": {
+      "label": "H-1.250",
+      "atomic_number": 201,
+      "role": "bottom_pseudo_h_iii_terminated_1p25",
+      "pseudopotential": "H-1.250.psf"
+    }
+  },
+  "hydrogen_role_mapping": {
+    "bottom_pseudo_h_n_terminated_0p75": {
+      "siesta_species_label": "H-0.750",
+      "siesta_species_index": 1,
+      "fixed_default": true
+    },
+    "bottom_pseudo_h_iii_terminated_1p25": {
+      "siesta_species_label": "H-1.250",
+      "siesta_species_index": 5,
+      "fixed_default": true
+    },
+    "ordinary_hydrogen": {
+      "siesta_species_label": "H",
+      "siesta_species_index": 4,
+      "fixed_default": false
+    },
+    "surface_adsorbed_hydrogen": {
+      "siesta_species_label": "H",
+      "siesta_species_index": 4,
+      "fixed_default": false
+    },
+    "molecule_h2_hydrogen": {
+      "siesta_species_label": "H",
+      "siesta_species_index": 4,
+      "fixed_default": "one_atom_fixed_in_molecule_template"
+    }
+  },
+  "fixed_atom_policy": {
+    "default_mode": "bottom_pseudo_h_plus_bottom_molecular_layer",
+    "available_modes": [
+      "preserve_imported_flags",
+      "bottom_pseudo_h_only",
+      "bottom_pseudo_h_plus_bottom_molecular_layer",
+      "manual_only"
+    ],
+    "bottom_side": "min_z",
+    "surface_axis": "z",
+    "bottom_h_threshold_ang": 1.5,
+    "bottom_layer_threshold_ang": 2.5,
+    "fixed_bottom_layers": 1,
+    "include_bottom_pseudo_h": true,
+    "record_fixed_reason": true,
+    "trailing_flag_interpretation_default": "preserve_or_ignore_unknown"
+  },
+  "structure_handling": {
+    "preserve_atom_order": true,
+    "coordinate_format": "Ang",
+    "coordinate_precision_default": 10,
+    "cell_precision_default": 10,
+    "precision_choices": [
+      6,
+      8,
+      10,
+      12,
+      16
+    ]
+  },
+  "scf_defaults": {
+    "SolutionMethod": {
+      "value": "diagon",
+      "source": "project_default_from_SIESTA_bulk_reference"
+    },
+    "MaxSCFIterations": {
+      "value": 1000,
+      "source": "project_default_from_SIESTA_bulk_reference"
+    },
+    "SCF.MustConverge": {
+      "value": "T",
+      "source": "project_default"
+    },
+    "DM.Tolerance": {
+      "value": "1.d-4",
+      "source": "project_default_from_SIESTA_bulk_reference"
+    },
+    "DM.MixingWeight": {
+      "value": 0.03,
+      "source": "project_default_from_SIESTA_bulk_reference"
+    },
+    "DM.NumberPulay": {
+      "value": 8,
+      "source": "project_default_from_SIESTA_bulk_reference"
+    },
+    "ElectronicTemperature": {
+      "value": "300 K",
+      "source": "project_default_from_SIESTA_bulk_reference"
+    },
+    "OccupationFunction": {
+      "value": "FD",
+      "source": "project_default_from_SIESTA_bulk_reference"
+    }
+  },
+  "relax_defaults": {
+    "MD.TypeOfRun": {
+      "value": "CG",
+      "source": "project_default"
+    },
+    "MD.VariableCell": {
+      "value": "F",
+      "source": "project_default_slab_fixed_cell"
+    },
+    "MD.Steps": {
+      "value": 500,
+      "source": "Miyaguchi_QE_slab_nstep_500_translated"
+    },
+    "MD.MaxForceTol": {
+      "value": "0.01 eV/Ang",
+      "source": "project_default_for_SIESTA_slab"
+    },
+    "MD.MaxDispl": {
+      "value": "0.05 Ang",
+      "source": "project_default_from_SIESTA_bulk_reference"
+    },
+    "GeometryMustConverge": {
+      "value": "T",
+      "source": "project_default"
+    }
+  },
+  "kpoints": {
+    "kgrid.MonkhorstPack": {
+      "value": [
+        [
+          3,
+          0,
+          0,
+          0.0
+        ],
+        [
+          0,
+          3,
+          0,
+          0.0
+        ],
+        [
+          0,
+          0,
+          1,
+          0.0
+        ]
+      ],
+      "source": "Miyaguchi_slab_kgrid_3x3x1"
+    }
+  },
+  "advanced_parameters": {
+    "Slab.DipoleCorrection": {
+      "value": "none",
+      "source": "SIESTA_default_in_fdf_log",
+      "editable": true,
+      "note": "Do not turn on without a dedicated validation run."
+    },
+    "SimulateDoping": {
+      "value": "F",
+      "source": "SIESTA_default_in_fdf_log",
+      "editable": true,
+      "note": "Use NetCharge for fixed-charge slab workflow unless supervisor/Kempisty decides otherwise."
+    },
+    "DM.UseSaveDM": {
+      "value": "F",
+      "source": "clean_run_default",
+      "editable": true,
+      "note": "Enable only for explicit continuation from a previous DM file."
+    }
+  },
+  "validation_rules": [
+    "Generated FDF must not contain explanatory comments.",
+    "Do not generate csh/sh/PBS/SLURM/job scripts.",
+    "For slab templates, MD.VariableCell must be F unless user explicitly overrides.",
+    "For bottom N-terminated GaN slab, bottom pseudo-H must map to H-0.750 species index 1.",
+    "Fix bottom pseudo-H + bottom Ga-N molecular layer by default.",
+    "Do not output assume_isolated; it is QE-only, not a SIESTA FDF parameter.",
+    "Kangawa GaN SIESTA p-type slab profile must generate NetCharge +0.25.",
+    "Charged n/p profiles must generate Spin polarized.",
+    "Charged n/p profiles must generate Spin.Fix F and must not emit Spin.Total or DM.InitSpin by default.",
+    "Required PSF names must remain Ga.psf, N.psf, H.psf, H-0.750.psf, H-1.250.psf unless the user edits the PSF assignment column."
+  ],
+  "profile_id": "Kangawa_GaN_SIESTA_p_type_slab_v1",
+  "display_name": "Kangawa GaN SIESTA p-type / hole-added slab (q=+0.25, spin polarized)",
+  "calculation_template": "charged_slab_electron_removed",
+  "charge_spin": {
+    "NetCharge": {
+      "value": 0.25,
+      "source": "p_type_fixed_charge_project_default"
+    },
+    "Spin": {
+      "value": "polarized",
+      "source": "p_type_fixed_charge_project_default"
+    },
+    "Spin.Fix": {
+      "value": "F",
+      "source": "p_type_fixed_charge_project_default"
+    },
+    "Spin.Total": {
+      "emit": false,
+      "source": "p_type_fixed_charge_project_default"
+    },
+    "DM.InitSpin": {
+      "emit": false,
+      "source": "p_type_fixed_charge_project_default"
+    }
+  },
+  "initial_spin_policy": {
+    "enabled": false,
+    "note": "No DM.InitSpin by default. Add an explicit initial-spin block only after a separate magnetic-state validation."
+  },
+  "recommended_use": "Fixed-charge p-type (electron-removed) SIESTA calculation for GaN surface slabs after the neutral baseline is validated.",
+  "notes_for_user": [
+    "Use after the neutral GaN slab calculation converges.",
+    "SIESTA NetCharge is positive for electron removal; this profile uses +0.25 to match the existing charged-slab workflow.",
+    "Spin polarized is enabled, but Spin.Total and DM.InitSpin are intentionally omitted unless the user explicitly validates a magnetic state."
+  ],
+  "pseudopotential_directory": "../potential"
+}

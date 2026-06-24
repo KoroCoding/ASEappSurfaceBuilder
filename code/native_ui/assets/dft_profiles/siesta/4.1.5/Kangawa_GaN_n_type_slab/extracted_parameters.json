@@ -1,0 +1,106 @@
+{
+  "schema_version": "aseapp.dft_extracted_parameters.v1",
+  "source_file": "xc.fdf",
+  "code": "SIESTA",
+  "version": "4.1.5",
+  "source": "Kempisty_shared_xc_fdf",
+  "scalar_parameters": {
+    "xc.functional": {
+      "value": "GGA",
+      "source": "imported_xc_fdf"
+    },
+    "xc.authors": {
+      "value": "PBEJsJrLO",
+      "source": "imported_xc_fdf"
+    },
+    "PAO.OldStylePolOrbs": {
+      "value": "F",
+      "source": "imported_xc_fdf"
+    },
+    "MeshSubDivisions": {
+      "value": 4,
+      "source": "imported_xc_fdf"
+    },
+    "NumberOfSpecies": {
+      "value": 5,
+      "source": "imported_xc_fdf"
+    },
+    "PAO.BasisSize": {
+      "value": "TZP",
+      "source": "imported_xc_fdf"
+    },
+    "PAO.EnergyShift": {
+      "value": "10.0 meV",
+      "source": "imported_xc_fdf"
+    },
+    "MeshCutoff": {
+      "value": "410 Ry",
+      "source": "imported_xc_fdf"
+    },
+    "PAO.SplitNorm": {
+      "value": 0.3,
+      "source": "imported_xc_fdf"
+    },
+    "PAO.SplitNormH": {
+      "value": 0.5,
+      "source": "imported_xc_fdf"
+    },
+    "PAO.SoftDefault": {
+      "value": "T",
+      "source": "imported_xc_fdf"
+    },
+    "PAO.NewSplitCode": {
+      "value": "T",
+      "source": "imported_xc_fdf"
+    },
+    "PAO.BasisType": {
+      "value": "split",
+      "source": "imported_xc_fdf"
+    }
+  },
+  "species_mapping": {
+    "1": {
+      "label": "H-0.750",
+      "atomic_number": 201,
+      "role": "bottom_pseudo_h_n_terminated_0p75",
+      "pseudopotential": "H-0.750.psf"
+    },
+    "2": {
+      "label": "N",
+      "atomic_number": 7,
+      "role": "anion",
+      "pseudopotential": "N.psf"
+    },
+    "3": {
+      "label": "Ga",
+      "atomic_number": 31,
+      "role": "cation",
+      "pseudopotential": "Ga.psf"
+    },
+    "4": {
+      "label": "H",
+      "atomic_number": 1,
+      "role": "ordinary_hydrogen",
+      "pseudopotential": "H.psf"
+    },
+    "5": {
+      "label": "H-1.250",
+      "atomic_number": 201,
+      "role": "bottom_pseudo_h_iii_terminated_1p25",
+      "pseudopotential": "H-1.250.psf"
+    }
+  },
+  "blocks": {
+    "ChemicalSpeciesLabel": " 1   201  H-0.750\n 2     7  N\n 3    31  Ga\n 4     1  H\n 5   201  H-1.250",
+    "PS.lmax": "H          2\nN          2\nGa         2\nH-1.250    2\nH-0.750    2",
+    "PAO.Basis": "stored_in_xc_fdf_full_block",
+    "SyntheticAtoms": "1\n1  2  3  4\n0.750000    0.000000    0.000000    0.000000\n5\n1  2  3  4\n1.250000    0.000000    0.000000    0.000000"
+  },
+  "ps_lmax": {
+    "H": 2,
+    "N": 2,
+    "Ga": 2,
+    "H-1.250": 2,
+    "H-0.750": 2
+  }
+}

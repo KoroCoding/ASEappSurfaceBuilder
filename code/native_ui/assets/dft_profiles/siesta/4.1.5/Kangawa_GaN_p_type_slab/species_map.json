@@ -1,0 +1,32 @@
+{
+  "1": {
+    "label": "H-0.750",
+    "atomic_number": 201,
+    "role": "bottom_pseudo_h_n_terminated_0p75",
+    "pseudopotential": "H-0.750.psf"
+  },
+  "2": {
+    "label": "N",
+    "atomic_number": 7,
+    "role": "anion",
+    "pseudopotential": "N.psf"
+  },
+  "3": {
+    "label": "Ga",
+    "atomic_number": 31,
+    "role": "cation",
+    "pseudopotential": "Ga.psf"
+  },
+  "4": {
+    "label": "H",
+    "atomic_number": 1,
+    "role": "ordinary_hydrogen",
+    "pseudopotential": "H.psf"
+  },
+  "5": {
+    "label": "H-1.250",
+    "atomic_number": 201,
+    "role": "bottom_pseudo_h_iii_terminated_1p25",
+    "pseudopotential": "H-1.250.psf"
+  }
+}

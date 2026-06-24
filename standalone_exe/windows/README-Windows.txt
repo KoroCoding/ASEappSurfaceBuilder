@@ -3,17 +3,16 @@
 
 通常の使い方
 ------------
-単体 launcher 版を使う場合は、`ASEappSurfaceBuilder-1.3.3-Windows.exe` を実行してください。
-ZIP 展開版を使う場合は、フォルダ構成を崩さずに `bin\ASEappNativeUI.exe` を実行してください。
-`bin` / `plugins` / `translations` を含む一式を同じ場所に置いてください。
+推奨: このフォルダの `Run-ASEappSurfaceBuilder-1.3.4.cmd` を実行してください。
+直接起動する場合は、以下を実行してください。
 
-署名について
-------------
-このローカル開発ビルドは、Smart App Control / Code Integrity で自己署名ランチャーがブロックされる環境があるため、既定では署名なしで作成しています。
-配布先で警告を減らすには、Microsoft Trusted Signing、Microsoft Store、または公開 CA の OV/EV コード署名証明書など、Windows が信頼する署名で再署名してください。
+  ASEappSurfaceBuilder-1.3.4\ASEappSurfaceBuilder-1.3.4.exe
 
-補足
-----
-- `ASEapp-Windows-Trust-LocalCertificate.ps1` は、ローカル自己署名で作成した場合だけ利用する補助スクリプトです。
-- SmartScreen / Smart App Control / 組織ポリシーによるブロックは、ローカル自己署名だけでは解除できない場合があります。
-- ファイルをインターネットから取得した場合は、必要に応じてプロパティの「許可する」または `Unblock-File` でダウンロードマークを解除してください。
+`ASEappSurfaceBuilder-1.3.4` フォルダ内の DLL / plugins / assets / tools は同じフォルダ構成のままにしてください。
+
+セキュリティソフト・Smart App Control について
+----------------------------------------------
+旧来の単体自己展開 launcher EXE は、Smart App Control / Code Integrity の Enterprise signing policy で止められることがあります。
+そのため 1.3.4 では、確認済みの通常ポータブル構成を推奨します。
+自己署名証明書は `ASEappSurfaceBuilder-1.3.4` フォルダに同梱していますが、自己署名だけでは組織/Windows の実行制御を必ず回避できません。
+ブロックされる場合は、組織の許可リストまたは正式なコード署名証明書での配布が必要です。

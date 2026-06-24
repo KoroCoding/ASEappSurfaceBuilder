@@ -4631,7 +4631,7 @@ void MainWindow::dropEvent(QDropEvent* event) {
 
 void MainWindow::openStructure() {
     const QString path = QFileDialog::getOpenFileName(this, "Open structure", defaultOpenDirectory(),
-        "Structure files (*.aseproj *.json *.cif *.xyz *.extxyz *.vasp POSCAR CONTCAR *.poscar *.pdb *.xsf);;All files (*.*)");
+        "Structure files (*.aseproj *.json *.cif *.xyz *.extxyz *.vasp POSCAR CONTCAR *.poscar *.pdb *.xsf *.txt *.out);;All files (*.*)");
     if (!path.isEmpty()) loadFromPathAsync(path);
 }
 

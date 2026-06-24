@@ -1,0 +1,43 @@
+﻿xc.functional GGA
+xc.authors PBEJsJrLO
+MeshCutoff 410 Ry
+NumberOfSpecies 5
+PAO.BasisSize TZP
+PAO.EnergyShift 0.02 Ry
+PAO.SplitNorm 0.15
+PAO.SplitNormH 0.15
+%block PS.lmax
+H          2
+N          2
+Ga         2
+H-1.250    2
+H-0.750    2
+%endblock PS.lmax
+%block ChemicalSpeciesLabel
+  1 201 H-0.750
+  2 7 N
+  3 31 Ga
+  4 1 H
+  5 201 H-1.250
+%endblock ChemicalSpeciesLabel
+%block SyntheticAtoms
+  H-0.750 0.75
+  H-1.250 1.25
+%endblock SyntheticAtoms
+%block PAO.Basis
+H-0.750 2
+  n=1 0 2 E 50.0 2.0
+  n=2 1 1 E 50.0 2.0
+N 2
+  n=2 0 2 E 50.0 2.0
+  n=2 1 2 E 50.0 2.0
+Ga 2
+  n=4 0 2 E 50.0 2.0
+  n=4 1 2 E 50.0 2.0
+H 2
+  n=1 0 2 E 50.0 2.0
+  n=2 1 1 E 50.0 2.0
+H-1.250 2
+  n=1 0 2 E 50.0 2.0
+  n=2 1 1 E 50.0 2.0
+%endblock PAO.Basis

@@ -1,5 +1,5 @@
 param(
-    [string]$Version = '1.3.3',
+    [string]$Version = '1.3.4',
     [string]$ZipPath = '',
     [string]$OutputExe = '',
     [string]$QtBinRoot = $env:ASEAPP_QT_BIN_ROOT,

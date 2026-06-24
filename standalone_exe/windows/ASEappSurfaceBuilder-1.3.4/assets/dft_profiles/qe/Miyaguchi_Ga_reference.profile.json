@@ -1,0 +1,20 @@
+{
+  "code": "qe",
+  "version": "7.3.1",
+  "profile_name": "Miyaguchi_Ga_reference",
+  "executable": "pw.x",
+  "input_schema": "pw_7_3_1",
+  "calculation_mode": "ga_atom_reference",
+  "parameters": {
+    "qe.CONTROL.calculation": "scf",
+    "qe.CONTROL.prefix": "Ga",
+    "qe.SYSTEM.ecutwfc": "80",
+    "qe.SYSTEM.occupations": "fixed",
+    "qe.SYSTEM.nspin": "2",
+    "qe.SYSTEM.starting_magnetization(1)": "1.0",
+    "qe.SYSTEM.tot_magnetization": "1.0",
+    "qe.ELECTRONS.conv_thr": "1.0d-8",
+    "qe.K_POINTS.automatic": "1 1 1 0 0 0"
+  },
+  "profile": "Miyaguchi_Ga_reference"
+}

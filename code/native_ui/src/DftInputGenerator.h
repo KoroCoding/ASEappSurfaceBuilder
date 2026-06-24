@@ -10,6 +10,10 @@ public:
     static DftGeneratedInput generate(const StructureData& structure, DftSettings settings);
     static bool writeGeneratedFiles(const QString& outputDirectory, const DftSettings& settings,
                                     const DftGeneratedInput& generated, QString* errorMessage = nullptr);
+    static QVector<DftScientificChecklistItem> scientificChecklist(const StructureData& structure,
+                                                                    const DftSettings& settings,
+                                                                    const DftGeneratedInput& generated);
+    static QString scientificChecklistText(const QVector<DftScientificChecklistItem>& items);
     static bool hasNoExplanatoryComments(const QString& text, DftCode code, QStringList* offendingLines = nullptr);
     static QString structureHash(const StructureData& structure);
 };

@@ -2229,8 +2229,8 @@ void StructureCanvas::paintGL() {
             viewport,
             Qt::AlignCenter,
             m_japanese
-                ? QStringLiteral("Open or drop a structure file to start.\nSupported: ASE project, CIF, XYZ, POSCAR/CONTCAR, PDB, XSF.")
-                : QStringLiteral("Open or drop a structure file to start.\nSupported: ASE project, CIF, XYZ, POSCAR/CONTCAR, PDB, XSF."));
+                ? QStringLiteral("Open or drop a structure file to start.\nSupported: ASE project, CIF, XYZ, POSCAR/CONTCAR, PDB, XSF, SIESTA final txt/out.")
+                : QStringLiteral("Open or drop a structure file to start.\nSupported: ASE project, CIF, XYZ, POSCAR/CONTCAR, PDB, XSF, SIESTA final txt/out."));
         painter.drawText(
             rect().adjusted(18, 0, -18, -14),
             Qt::AlignBottom | Qt::AlignLeft,

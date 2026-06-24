@@ -2,13 +2,17 @@ cmake_minimum_required(VERSION 3.21)
 if(POLICY CMP0091)
   cmake_policy(SET CMP0091 NEW)
 endif()
-project(aseapp_native_ui VERSION 1.3.3 LANGUAGES CXX)
+project(aseapp_native_ui VERSION 1.3.4 LANGUAGES CXX)
 
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_AUTOMOC ON)
 set(CMAKE_AUTORCC ON)
 set(CMAKE_AUTOUIC ON)
+
+if(MSVC)
+  add_compile_options(/utf-8)
+endif()
 
 include(GNUInstallDirs)
 
@@ -163,21 +167,24 @@ if(WIN32)
   endforeach()
 endif()
 
-function(aseapp_prepare_windows_build_runtime target_name)
-  if(NOT WIN32 OR NOT ASEAPP_QT_PLUGIN_DIR)
-    return()
-  endif()
-  set(ASEAPP_BUILD_QT_CONF "${CMAKE_CURRENT_BINARY_DIR}/${target_name}_qt.conf")
+if(WIN32 AND ASEAPP_QT_PLUGIN_DIR)
+  set(ASEAPP_BUILD_QT_CONF "${CMAKE_CURRENT_BINARY_DIR}/aseapp_build_tree_qt.conf")
   file(WRITE "${ASEAPP_BUILD_QT_CONF}" "[Paths]\nPlugins = plugins\n")
-  add_custom_command(TARGET ${target_name} POST_BUILD
+  add_custom_target(aseapp_windows_build_runtime
     COMMAND ${CMAKE_COMMAND} -E copy_directory
       "${ASEAPP_QT_PLUGIN_DIR}"
-      "$<TARGET_FILE_DIR:${target_name}>/plugins"
+      "${CMAKE_CURRENT_BINARY_DIR}/$<CONFIG>/plugins"
     COMMAND ${CMAKE_COMMAND} -E copy_if_different
       "${ASEAPP_BUILD_QT_CONF}"
-      "$<TARGET_FILE_DIR:${target_name}>/qt.conf"
+      "${CMAKE_CURRENT_BINARY_DIR}/$<CONFIG>/qt.conf"
     COMMENT "Copying Qt plugins for direct Windows build-tree launches"
   )
+endif()
+
+function(aseapp_prepare_windows_build_runtime target_name)
+  if(TARGET aseapp_windows_build_runtime)
+    add_dependencies(${target_name} aseapp_windows_build_runtime)
+  endif()
 endfunction()
 
 aseapp_prepare_windows_build_runtime(aseapp_native_ui)
@@ -275,6 +282,7 @@ if(BUILD_TESTING)
     src/DftInputTypes.h
     src/DftParameterRegistry.cpp
     src/DftParameterRegistry.h
+    src/dft_profiles.qrc
     src/ElementStyle.cpp
     src/ElementStyle.h
     src/StructureData.h

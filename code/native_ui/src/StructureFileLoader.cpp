@@ -65,10 +65,22 @@ double parseNumber(QString token, double fallback = 0.0) {
         return fallback;
     }
     token.remove(QRegularExpression(QStringLiteral("\\([^\\)]*\\)$")));
+    token.replace(QLatin1Char('D'), QLatin1Char('E'));
+    token.replace(QLatin1Char('d'), QLatin1Char('e'));
     bool ok = false;
     const double value = token.toDouble(&ok);
     return ok ? value : fallback;
 }
+
+double parseStrictNumber(QString token, bool* ok) {
+    token = token.trimmed();
+    token.remove(QRegularExpression(QStringLiteral("\\([^\\)]*\\)$")));
+    token.replace(QLatin1Char('D'), QLatin1Char('E'));
+    token.replace(QLatin1Char('d'), QLatin1Char('e'));
+    return token.toDouble(ok);
+}
+
+QStringList tokenizeRespectingQuotes(const QString& line);
 
 QString trailingFlagInterpretationKey(StructureTrailingFlagInterpretation interpretation) {
     switch (interpretation) {
@@ -117,7 +129,8 @@ bool parsePoscarMovableFlag(const QString& token, StructureTrailingFlagInterpret
                             bool selectiveDynamics, bool* movable) {
     switch (interpretation) {
     case StructureTrailingFlagInterpretation::PreserveOrIgnoreUnknown:
-        return selectiveDynamics && parsePoscarTfMovableFlag(token, movable);
+        return (selectiveDynamics && parsePoscarTfMovableFlag(token, movable)) ||
+               parsePoscarNumericMovableFlag(token, false, movable);
     case StructureTrailingFlagInterpretation::IgnoreTrailingFlags:
     case StructureTrailingFlagInterpretation::CustomMapping:
         return false;
@@ -509,6 +522,27 @@ std::array<QVector3D, 3> buildCell(double a, double b, double c, double alphaDeg
 
 bool hasCell(const std::array<QVector3D, 3>& cell) {
     return cell[0].lengthSquared() > 1.0e-8f && cell[1].lengthSquared() > 1.0e-8f && cell[2].lengthSquared() > 1.0e-8f;
+}
+
+bool parseVector3Line(const QString& line, QVector3D* vector) {
+    if (vector == nullptr) {
+        return false;
+    }
+    const QStringList parts = tokenizeRespectingQuotes(line.trimmed());
+    if (parts.size() < 3) {
+        return false;
+    }
+    bool xOk = false;
+    bool yOk = false;
+    bool zOk = false;
+    const double x = parseStrictNumber(parts.at(0), &xOk);
+    const double y = parseStrictNumber(parts.at(1), &yOk);
+    const double z = parseStrictNumber(parts.at(2), &zOk);
+    if (!xOk || !yOk || !zOk) {
+        return false;
+    }
+    *vector = QVector3D(static_cast<float>(x), static_cast<float>(y), static_cast<float>(z));
+    return true;
 }
 
 void ensureCell(StructureData& data) {
@@ -1211,6 +1245,190 @@ std::optional<StructureData> loadXsf(const QString& path, QString* errorMessage)
     return data;
 }
 
+QString siestaTextTitle(const QStringList& lines, const QString& fallback) {
+    QString systemLabel;
+    for (const QString& line : lines) {
+        const QString trimmed = line.trimmed();
+        if (trimmed.startsWith(QStringLiteral("Label:"), Qt::CaseInsensitive)) {
+            const QString value = trimmed.mid(QStringLiteral("Label:").size()).trimmed();
+            if (!value.isEmpty()) {
+                return value;
+            }
+        }
+        if (trimmed.startsWith(QStringLiteral("SystemLabel:"), Qt::CaseInsensitive)) {
+            systemLabel = trimmed.mid(QStringLiteral("SystemLabel:").size()).trimmed();
+        } else if (trimmed.startsWith(QStringLiteral("SystemLabel "), Qt::CaseInsensitive)) {
+            const QStringList parts = tokenizeRespectingQuotes(trimmed);
+            if (parts.size() >= 2) {
+                systemLabel = parts.at(1).trimmed();
+            }
+        }
+    }
+    return systemLabel.trimmed().isEmpty() ? fallback : systemLabel.trimmed();
+}
+
+double siestaLatticeScale(const QStringList& lines) {
+    for (const QString& line : lines) {
+        const QStringList parts = tokenizeRespectingQuotes(line.trimmed());
+        if (parts.size() < 2 || parts.first().compare(QStringLiteral("LatticeConstant"), Qt::CaseInsensitive) != 0) {
+            continue;
+        }
+        bool ok = false;
+        double scale = parseStrictNumber(parts.at(1), &ok);
+        if (!ok || scale <= 0.0) {
+            return 1.0;
+        }
+        if (parts.size() >= 3 && parts.at(2).startsWith(QStringLiteral("Bohr"), Qt::CaseInsensitive)) {
+            scale *= 0.529177210903;
+        }
+        return scale;
+    }
+    return 1.0;
+}
+
+std::optional<std::array<QVector3D, 3>> siestaCellFromText(const QStringList& lines) {
+    const double latticeScale = siestaLatticeScale(lines);
+    for (int i = 0; i < lines.size(); ++i) {
+        const QString trimmed = lines.at(i).trimmed();
+        if (!trimmed.startsWith(QStringLiteral("%block"), Qt::CaseInsensitive) ||
+            !trimmed.contains(QStringLiteral("LatticeVectors"), Qt::CaseInsensitive)) {
+            continue;
+        }
+        std::array<QVector3D, 3> cell{};
+        int vectorCount = 0;
+        for (int j = i + 1; j < lines.size(); ++j) {
+            const QString row = lines.at(j).trimmed();
+            if (row.startsWith(QStringLiteral("%endblock"), Qt::CaseInsensitive)) {
+                break;
+            }
+            QVector3D vector;
+            if (parseVector3Line(row, &vector)) {
+                if (vectorCount < 3) {
+                    cell[static_cast<std::size_t>(vectorCount)] = vector * static_cast<float>(latticeScale);
+                }
+                ++vectorCount;
+            }
+        }
+        if (vectorCount >= 3 && hasCell(cell)) {
+            return cell;
+        }
+    }
+
+    for (int i = 0; i < lines.size(); ++i) {
+        const QString trimmed = lines.at(i).trimmed();
+        if (!trimmed.startsWith(QStringLiteral("outcell:"), Qt::CaseInsensitive) ||
+            !trimmed.contains(QStringLiteral("Unit cell vectors"), Qt::CaseInsensitive)) {
+            continue;
+        }
+        std::array<QVector3D, 3> cell{};
+        int vectorCount = 0;
+        for (int j = i + 1; j < lines.size() && vectorCount < 3; ++j) {
+            QVector3D vector;
+            if (parseVector3Line(lines.at(j), &vector)) {
+                cell[static_cast<std::size_t>(vectorCount)] = vector;
+                ++vectorCount;
+            } else if (vectorCount > 0 && !lines.at(j).trimmed().isEmpty()) {
+                break;
+            }
+        }
+        if (vectorCount == 3 && hasCell(cell)) {
+            return cell;
+        }
+    }
+
+    return std::nullopt;
+}
+
+std::vector<NativeAtom> siestaRelaxedAtomsFromText(const QStringList& lines) {
+    const QString numberPattern = QStringLiteral("[-+]?(?:\\d+(?:\\.\\d*)?|\\.\\d+)(?:[EeDd][-+]?\\d+)?");
+    const QRegularExpression atomLineRx(
+        QStringLiteral("^\\s*(%1)\\s+(%1)\\s+(%1)\\s+(\\d+)\\s+(\\d+)\\s+([^\\s#]+)")
+            .arg(numberPattern, numberPattern, numberPattern),
+        QRegularExpression::CaseInsensitiveOption);
+
+    std::vector<NativeAtom> bestAtoms;
+    std::vector<NativeAtom> currentAtoms;
+    bool inRelaxedBlock = false;
+
+    auto finishCurrentBlock = [&]() {
+        if (!currentAtoms.empty()) {
+            bestAtoms = currentAtoms;
+            currentAtoms.clear();
+        }
+    };
+
+    for (const QString& line : lines) {
+        const QString trimmed = line.trimmed();
+        if (trimmed.startsWith(QStringLiteral("outcoor:"), Qt::CaseInsensitive) &&
+            trimmed.contains(QStringLiteral("coordinates"), Qt::CaseInsensitive)) {
+            finishCurrentBlock();
+            inRelaxedBlock = true;
+            continue;
+        }
+        if (!inRelaxedBlock) {
+            continue;
+        }
+        if (trimmed.isEmpty()) {
+            finishCurrentBlock();
+            inRelaxedBlock = false;
+            continue;
+        }
+        const auto match = atomLineRx.match(line);
+        if (!match.hasMatch()) {
+            finishCurrentBlock();
+            inRelaxedBlock = false;
+            continue;
+        }
+
+        bool xOk = false;
+        bool yOk = false;
+        bool zOk = false;
+        bool atomIdOk = false;
+        const double x = parseStrictNumber(match.captured(1), &xOk);
+        const double y = parseStrictNumber(match.captured(2), &yOk);
+        const double z = parseStrictNumber(match.captured(3), &zOk);
+        const int atomId = match.captured(5).toInt(&atomIdOk);
+        if (!xOk || !yOk || !zOk) {
+            continue;
+        }
+
+        const QString label = match.captured(6).trimmed();
+        NativeAtom atom;
+        atom.atomId = atomIdOk && atomId > 0 ? atomId : static_cast<int>(currentAtoms.size()) + 1;
+        atom.element = label;
+        atom.tag = QStringLiteral("%1-%2").arg(label).arg(atom.atomId, 4, 10, QChar('0'));
+        atom.cartesian = QVector3D(static_cast<float>(x), static_cast<float>(y), static_cast<float>(z));
+        currentAtoms.push_back(atom);
+    }
+    finishCurrentBlock();
+    return bestAtoms;
+}
+
+std::optional<StructureData> loadSiestaFinalText(const QString& path, QString* errorMessage) {
+    const QString text = readUtf8NoBom(path, errorMessage);
+    if (text.isEmpty()) {
+        return std::nullopt;
+    }
+    const QStringList lines = text.split(QRegularExpression(QStringLiteral("\r?\n")));
+    StructureData data;
+    data.sourcePath = path;
+    data.title = siestaTextTitle(lines, QFileInfo(path).baseName());
+
+    const auto cell = siestaCellFromText(lines);
+    if (cell.has_value()) {
+        data.cellVectors = *cell;
+    }
+    data.atoms = siestaRelaxedAtomsFromText(lines);
+    if (data.atoms.empty()) {
+        if (errorMessage) {
+            *errorMessage = QStringLiteral("No SIESTA relaxed coordinate block was found. Expected a line like \"outcoor: Relaxed atomic coordinates (Ang):\".");
+        }
+        return std::nullopt;
+    }
+    finalizeAtoms(data);
+    return data;
+}
+
 QString suffixForPath(const QString& path) {
     const QFileInfo info(path);
     const QString fileName = info.fileName().toLower();
@@ -1249,6 +1467,9 @@ std::optional<StructureData> StructureFileLoader::load(const QString& path, QStr
     }
     if (suffix == "xsf") {
         return loadXsf(path, errorMessage);
+    }
+    if (suffix == "txt" || suffix == "out") {
+        return loadSiestaFinalText(path, errorMessage);
     }
     if (errorMessage) {
         *errorMessage = QStringLiteral("Unsupported file format for native loader: %1").arg(QFileInfo(path).suffix());
