@@ -743,7 +743,12 @@ in vec2 vUv; uniform sampler2D uLabelAtlas; out vec4 fragColor; void main(){vec4
         if (f == nullptr) return false;
         if (image.isNull() || image.width() <= 0 || image.height() <= 0) return true;
         if (labelTexture == 0) f->glGenTextures(1, &labelTexture);
-        const QImage glImage = image.convertToFormat(QImage::Format_RGBA8888).mirrored(false, true);
+        QImage glImage = image.convertToFormat(QImage::Format_RGBA8888);
+#if QT_VERSION >= QT_VERSION_CHECK(6, 9, 0)
+        glImage.flip(Qt::Vertical);
+#else
+        glImage = glImage.mirrored(false, true);
+#endif
         f->glBindTexture(GL_TEXTURE_2D, labelTexture);
         f->glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR); f->glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
         f->glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE); f->glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);

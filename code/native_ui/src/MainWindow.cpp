@@ -5234,7 +5234,10 @@ void MainWindow::optimizeStructureWithUma() {
         ? QStringLiteral("current structure")
         : QFileInfo(m_structure.sourcePath).fileName());
     QFile persistentLog(persistentLogPath);
-    persistentLog.open(QIODevice::WriteOnly | QIODevice::Truncate | QIODevice::Text);
+    if (!persistentLog.open(QIODevice::WriteOnly | QIODevice::Truncate | QIODevice::Text)) {
+        appendUmaLog(QStringLiteral("[ASEapp] Could not open persistent log: %1\n")
+            .arg(persistentLog.errorString()));
+    }
     const QString commandLine = QStringLiteral("[ASEapp] Command:\n%1 %2\n\n").arg(program, arguments.join(QLatin1Char(' ')));
     appendUmaLog(commandLine);
     persistentLog.write(commandLine.toUtf8());
@@ -5467,7 +5470,10 @@ void MainWindow::optimizeFilesWithUmaBatch() {
 
     const QString persistentLogPath = beginUmaLog(m_japanese ? QStringLiteral("バッチ %1ファイル").arg(inputPaths.size()) : QStringLiteral("batch: %1 files").arg(inputPaths.size()));
     QFile persistentLog(persistentLogPath);
-    persistentLog.open(QIODevice::WriteOnly | QIODevice::Truncate | QIODevice::Text);
+    if (!persistentLog.open(QIODevice::WriteOnly | QIODevice::Truncate | QIODevice::Text)) {
+        appendUmaLog(QStringLiteral("[ASEapp] Could not open persistent log: %1\n")
+            .arg(persistentLog.errorString()));
+    }
     const QString header = QStringLiteral("[ASEapp] UMA batch\n[ASEapp] Inputs: %1\n[ASEapp] Output: <original directory>/<original name>_UMA.vasp\n\n")
         .arg(inputPaths.size());
     appendUmaLog(header);
