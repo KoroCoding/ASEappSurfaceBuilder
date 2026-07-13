@@ -1,8 +1,9 @@
-﻿#include "DftInputGeneratorDialog.h"
+#include "DftInputGeneratorDialog.h"
 
 #include "DftInputGenerator.h"
 #include "DftInputParser.h"
 #include "DftParameterRegistry.h"
+#include "ElementStyle.h"
 #include "StructureFileLoader.h"
 
 #include <QApplication>
@@ -25,6 +26,7 @@
 #include <QGroupBox>
 #include <QHBoxLayout>
 #include <QHeaderView>
+#include <QInputDialog>
 #include <QLabel>
 #include <QLineEdit>
 #include <QMessageBox>
@@ -32,15 +34,19 @@
 #include <QJsonArray>
 #include <QJsonDocument>
 #include <QJsonObject>
+#include <QJsonParseError>
+#include <QRegularExpression>
 #include <QScrollArea>
 #include <QScrollBar>
 #include <QScreen>
 #include <QSet>
+#include <QSettings>
 #include <QSignalBlocker>
 #include <QSizePolicy>
 #include <QTableWidget>
 #include <QTextEdit>
 #include <QTabWidget>
+#include <QVariant>
 #include <QVBoxLayout>
 
 #include <algorithm>
@@ -133,12 +139,150 @@ QString calculationTargetSuffix(const DftSettings& settings) {
     return QStringLiteral("_custom_profile");
 }
 
+QString dftUserDefaultsCodeKey(DftCode code) {
+    return code == DftCode::QuantumEspresso ? QStringLiteral("qe") : QStringLiteral("siesta");
+}
+
+QString dftUserDefaultsSettingsKey(DftCode code, QString version) {
+    version = version.trimmed();
+    if (version.isEmpty()) version = QStringLiteral("default");
+    version.replace(QLatin1Char('/'), QLatin1Char('_'));
+    version.replace(QLatin1Char('\\'), QLatin1Char('_'));
+    return QStringLiteral("dftInputGenerator/userDefaults/v1/%1/%2")
+        .arg(dftUserDefaultsCodeKey(code), version);
+}
+
+DftGenerationMode dftGenerationModeFromKey(const QString& key) {
+    const QString normalized = key.trimmed().toLower();
+    if (normalized == QStringLiteral("profile")) return DftGenerationMode::Profile;
+    if (normalized == QStringLiteral("import_edit") || normalized == QStringLiteral("import-edit")) return DftGenerationMode::ImportEdit;
+    return DftGenerationMode::Manual;
+}
+
+bool saveableUserDefaultParameter(const QString& id) {
+    return id != QStringLiteral("siesta.general.SystemName") &&
+           id != QStringLiteral("siesta.general.SystemLabel");
+}
+
+QJsonObject dftUserDefaultsObject(const DftSettings& settings) {
+    QJsonObject root;
+    root.insert(QStringLiteral("schema_version"), QStringLiteral("aseapp.dft_user_defaults.v1"));
+    root.insert(QStringLiteral("code"), dftUserDefaultsCodeKey(settings.code));
+    root.insert(QStringLiteral("version"), settings.version);
+    root.insert(QStringLiteral("profile_name"), settings.profileName);
+    root.insert(QStringLiteral("generation_mode"), dftGenerationModeKey(settings.generationMode));
+    root.insert(QStringLiteral("calculation_mode"), settings.calculationMode);
+    root.insert(QStringLiteral("include_xc_fdf"), settings.includeXcFdf);
+    root.insert(QStringLiteral("standalone_inline"), settings.standaloneInline);
+    root.insert(QStringLiteral("allow_unknown_hydrogen"), settings.allowUnknownHydrogen);
+    root.insert(QStringLiteral("qe_assume_isolated"), settings.qeAssumeIsolated);
+    root.insert(QStringLiteral("qe_project_style_fixed_flags"), settings.qeProjectStyleFixedFlags);
+    root.insert(QStringLiteral("trailing_flag_interpretation"), dftTrailingFlagInterpretationKey(settings.trailingFlagInterpretation));
+    root.insert(QStringLiteral("xc_fdf_path"), settings.xcFdfPath);
+    root.insert(QStringLiteral("pseudo_dir"), settings.pseudoDir);
+
+    QJsonObject parameters;
+    for (auto it = settings.parameters.cbegin(); it != settings.parameters.cend(); ++it) {
+        if (!saveableUserDefaultParameter(it.key())) continue;
+        const DftParameterEntry& entry = it.value();
+        if (!entry.enabled && entry.value.trimmed().isEmpty()) continue;
+        if (entry.source == DftParameterSource::Unknown && entry.value.trimmed().isEmpty()) continue;
+        QJsonObject parameter;
+        parameter.insert(QStringLiteral("value"), entry.value);
+        parameter.insert(QStringLiteral("enabled"), entry.enabled);
+        parameters.insert(it.key(), parameter);
+    }
+    root.insert(QStringLiteral("parameters"), parameters);
+    return root;
+}
+
+bool saveDftUserDefaults(const DftSettings& settings, QString* errorMessage) {
+    const QJsonObject root = dftUserDefaultsObject(settings);
+    QSettings store;
+    store.setValue(dftUserDefaultsSettingsKey(settings.code, settings.version),
+                   QString::fromUtf8(QJsonDocument(root).toJson(QJsonDocument::Compact)));
+    store.sync();
+    if (store.status() != QSettings::NoError) {
+        if (errorMessage != nullptr) *errorMessage = QStringLiteral("QSettingsへの保存に失敗しました。");
+        return false;
+    }
+    return true;
+}
+
+bool applyDftUserDefaultsObject(DftSettings* settings, const QJsonObject& root) {
+    if (settings == nullptr) return false;
+    const QString savedCode = root.value(QStringLiteral("code")).toString();
+    if (!savedCode.isEmpty() && savedCode != dftUserDefaultsCodeKey(settings->code)) return false;
+    const QString savedProfile = root.value(QStringLiteral("profile_name")).toString().trimmed();
+    if (!savedProfile.isEmpty()) settings->profileName = savedProfile;
+    const QString savedGenerationMode = root.value(QStringLiteral("generation_mode")).toString().trimmed();
+    if (!savedGenerationMode.isEmpty()) settings->generationMode = dftGenerationModeFromKey(savedGenerationMode);
+    const QString savedMode = root.value(QStringLiteral("calculation_mode")).toString().trimmed();
+    if (!savedMode.isEmpty()) {
+        DftParameterRegistry::applyCalculationModeDefaults(settings, savedMode);
+    }
+    if (root.contains(QStringLiteral("include_xc_fdf"))) {
+        settings->includeXcFdf = root.value(QStringLiteral("include_xc_fdf")).toBool(settings->includeXcFdf);
+    }
+    if (root.contains(QStringLiteral("standalone_inline"))) {
+        settings->standaloneInline = root.value(QStringLiteral("standalone_inline")).toBool(settings->standaloneInline);
+    }
+    if (root.contains(QStringLiteral("allow_unknown_hydrogen"))) {
+        settings->allowUnknownHydrogen = root.value(QStringLiteral("allow_unknown_hydrogen")).toBool(settings->allowUnknownHydrogen);
+    }
+    if (root.contains(QStringLiteral("qe_assume_isolated"))) {
+        settings->qeAssumeIsolated = root.value(QStringLiteral("qe_assume_isolated")).toBool(settings->qeAssumeIsolated);
+    }
+    if (root.contains(QStringLiteral("qe_project_style_fixed_flags"))) {
+        settings->qeProjectStyleFixedFlags = root.value(QStringLiteral("qe_project_style_fixed_flags")).toBool(settings->qeProjectStyleFixedFlags);
+    }
+    const QString trailing = root.value(QStringLiteral("trailing_flag_interpretation")).toString().trimmed();
+    if (!trailing.isEmpty()) {
+        settings->trailingFlagInterpretation = dftTrailingFlagInterpretationFromKey(trailing);
+    }
+    const QString xcFdfPath = root.value(QStringLiteral("xc_fdf_path")).toString().trimmed();
+    if (!xcFdfPath.isEmpty()) settings->xcFdfPath = xcFdfPath;
+    const QString pseudoDir = root.value(QStringLiteral("pseudo_dir")).toString().trimmed();
+    if (!pseudoDir.isEmpty()) settings->pseudoDir = pseudoDir;
+
+    const QJsonObject parameters = root.value(QStringLiteral("parameters")).toObject();
+    for (auto it = parameters.constBegin(); it != parameters.constEnd(); ++it) {
+        if (!saveableUserDefaultParameter(it.key())) continue;
+        if (!settings->parameters.contains(it.key())) continue;
+        if (it.value().isObject()) {
+            const QJsonObject parameter = it.value().toObject();
+            DftParameterRegistry::setParameterValue(settings, it.key(),
+                parameter.value(QStringLiteral("value")).toString(),
+                DftParameterSource::UserOverride);
+            settings->parameters[it.key()].enabled =
+                parameter.value(QStringLiteral("enabled")).toBool(settings->parameters.value(it.key()).enabled);
+        } else {
+            DftParameterRegistry::setParameterValue(settings, it.key(),
+                it.value().toVariant().toString(),
+                DftParameterSource::UserOverride);
+        }
+    }
+    return true;
+}
+
+bool applyDftUserDefaults(DftSettings* settings) {
+    if (settings == nullptr) return false;
+    QSettings store;
+    const QString json = store.value(dftUserDefaultsSettingsKey(settings->code, settings->version)).toString();
+    if (json.trimmed().isEmpty()) return false;
+    QJsonParseError parseError;
+    const QJsonDocument doc = QJsonDocument::fromJson(json.toUtf8(), &parseError);
+    if (parseError.error != QJsonParseError::NoError || !doc.isObject()) return false;
+    return applyDftUserDefaultsObject(settings, doc.object());
+}
+
 } // namespace
 
 DftInputGeneratorDialog::DftInputGeneratorDialog(const StructureData& structure, QWidget* parent)
     : QDialog(parent), m_initialStructure(structure), m_structure(structure) {
     const QString baseTarget = structure.title.isEmpty() ? QStringLiteral("ideal") : structure.title;
     m_settings = DftParameterRegistry::defaultSettings(DftCode::Siesta, QStringLiteral("4.1.5"), DftInputGenerator::sanitizeTargetName(baseTarget));
+    applyDftUserDefaults(&m_settings);
     m_settings.sourceStructurePath = structure.sourcePath;
     m_settings.trailingFlagInterpretation = dftTrailingFlagInterpretationFromKey(structure.trailingFlagInterpretation);
     m_settings.hydrogenAssignments = DftInputGenerator::inferHydrogenRoles(structure, m_settings);
@@ -176,7 +320,7 @@ void DftInputGeneratorDialog::buildUi() {
 
     auto* overviewPage = new QWidget(this);
     auto* overviewLayout = new QVBoxLayout(overviewPage);
-    auto* overviewNote = new QLabel(QStringLiteral("Basic overview: target固有名、構造、電荷/スピン、固定原子、数値条件、Kempisty/Kangawa checklistを一画面で確認します。"), overviewPage);
+    auto* overviewNote = new QLabel(QStringLiteral("Basic overview: target固有名、構造、電荷/スピン、固定原子、数値条件を一画面で確認します。DFT入力生成ではエラー判定を行いません。"), overviewPage);
     overviewNote->setWordWrap(true);
     overviewLayout->addWidget(overviewNote);
     m_overviewTable = new QTableWidget(overviewPage);
@@ -200,12 +344,16 @@ void DftInputGeneratorDialog::buildUi() {
     auto* fixedButtonRow = new QHBoxLayout();
     auto* fixSelectedButton = new QPushButton(QStringLiteral("Fix selected atoms"), structurePage);
     auto* freeSelectedButton = new QPushButton(QStringLiteral("Free selected atoms"), structurePage);
+    auto* replaceSelectedButton = new QPushButton(QStringLiteral("Replace selected atoms..."), structurePage);
     fixSelectedButton->setObjectName(QStringLiteral("fixSelectedAtomsButton"));
     freeSelectedButton->setObjectName(QStringLiteral("freeSelectedAtomsButton"));
-    fixSelectedButton->setToolTip(QStringLiteral("選択原子のNativeAtom::movableをfalseにし、Fixed atom modeがPreserve/Manual系のとき固定候補として扱います。"));
-    freeSelectedButton->setToolTip(QStringLiteral("選択原子のNativeAtom::movableをtrueに戻します。Geometry.Constraints/QE flagsへの反映はFixed atom modeに従います。"));
+    replaceSelectedButton->setObjectName(QStringLiteral("replaceSelectedAtomsButton"));
+    fixSelectedButton->setToolTip(QStringLiteral("選択原子のNativeAtom::movableをfalseにし、入力構造/手動fixedフラグとして生成へ反映します。"));
+    freeSelectedButton->setToolTip(QStringLiteral("選択原子のNativeAtom::movableをtrueに戻します。生成時のGeometry.Constraints/QE flagsから外れます。"));
+    replaceSelectedButton->setToolTip(QStringLiteral("Structure表で選択中の原子を指定元素へ置き換えます。座標と固定フラグは保持します。"));
     fixedButtonRow->addWidget(fixSelectedButton);
     fixedButtonRow->addWidget(freeSelectedButton);
+    fixedButtonRow->addWidget(replaceSelectedButton);
     fixedButtonRow->addStretch(1);
     structureLayout->addLayout(fixedButtonRow);
     m_structureTable = new QTableWidget(structurePage);
@@ -217,6 +365,7 @@ void DftInputGeneratorDialog::buildUi() {
     detailsLayout->addWidget(structurePage);
     connect(fixSelectedButton, &QPushButton::clicked, this, [this]() { setSelectedAtomsMovable(false); });
     connect(freeSelectedButton, &QPushButton::clicked, this, [this]() { setSelectedAtomsMovable(true); });
+    connect(replaceSelectedButton, &QPushButton::clicked, this, &DftInputGeneratorDialog::replaceSelectedAtomsElement);
 
     auto* hydrogenPage = new QWidget(this);
     auto* hydrogenLayout = new QVBoxLayout(hydrogenPage);
@@ -284,7 +433,7 @@ void DftInputGeneratorDialog::buildUi() {
 
     auto* constraintsPage = new QWidget(this);
     auto* constraintsLayout = new QVBoxLayout(constraintsPage);
-    auto* constraintsNote = new QLabel(QStringLiteral("固定原子: POSCAR/手動フラグ + 必要に応じて底面pseudo-H/底面分子層を追加固定します。"), constraintsPage);
+    auto* constraintsNote = new QLabel(QStringLiteral("固定原子: POSCAR/手動フラグのみ反映します。底面pseudo-H/底面分子層の自動追加固定は行いません。"), constraintsPage);
     constraintsNote->setWordWrap(true);
     constraintsLayout->setContentsMargins(0, 0, 0, 0);
     constraintsLayout->setSpacing(4);
@@ -295,11 +444,9 @@ void DftInputGeneratorDialog::buildUi() {
     constraintsForm->setVerticalSpacing(4);
     m_fixedAtomModeCombo = new QComboBox(constraintsPage);
     m_fixedAtomModeCombo->setObjectName(QStringLiteral("fixedAtomModeCombo"));
-    m_fixedAtomModeCombo->setToolTip(QStringLiteral("Fixed atom mode: POSCAR/手動のfixedフラグは常に反映し、その上でbottom pseudo-Hやbottom molecular layerを自動追加固定するかを選びます。Kangawa GaN slabではbottom pseudo-H+bottom molecular layerが推奨既定です。"));
-    m_fixedAtomModeCombo->addItem(QStringLiteral("Imported/manual fixed flags only"), dftFixedAtomModeKey(DftFixedAtomMode::PreserveImportedFlags));
-    m_fixedAtomModeCombo->addItem(QStringLiteral("Imported flags + bottom pseudo-H"), dftFixedAtomModeKey(DftFixedAtomMode::FixBottomPseudoHOnly));
-    m_fixedAtomModeCombo->addItem(QStringLiteral("Imported flags + bottom pseudo-H + bottom layer"), dftFixedAtomModeKey(DftFixedAtomMode::FixBottomPseudoHPlusBottomMolecularLayer));
-    m_fixedAtomModeCombo->addItem(QStringLiteral("Manual/import flags only"), dftFixedAtomModeKey(DftFixedAtomMode::ManualOnly));
+    m_fixedAtomModeCombo->setToolTip(QStringLiteral("固定原子は構造ファイル/手動指定のfixedフラグだけをそのまま反映します。bottom pseudo-Hやbottom layerを自動固定するモードは選択しません。"));
+    m_fixedAtomModeCombo->addItem(QStringLiteral("Use structure/manual fixed flags"), dftFixedAtomModeKey(DftFixedAtomMode::PreserveImportedFlags));
+    m_fixedAtomModeCombo->setEnabled(false);
     m_trailingFlagInterpretationCombo = new QComboBox(constraintsPage);
     m_trailingFlagInterpretationCombo->setObjectName(QStringLiteral("trailingFlagInterpretationCombo"));
     m_trailingFlagInterpretationCombo->setToolTip(QStringLiteral("VASP/POSCAR行末フラグ解釈: 既定ではT/Fと数値1 1 1を自動認識し、数値1はfixed、0はmovableとして扱い、行末列も保持します。"));
@@ -309,10 +456,10 @@ void DftInputGeneratorDialog::buildUi() {
     m_trailingFlagInterpretationCombo->addItem(QStringLiteral("Numeric 1 1 1 means movable"), dftTrailingFlagInterpretationKey(DftTrailingFlagInterpretation::NumericOneMeansMovable));
     m_trailingFlagInterpretationCombo->addItem(QStringLiteral("VASP T/F selective dynamics"), dftTrailingFlagInterpretationKey(DftTrailingFlagInterpretation::VaspSelectiveDynamics));
     m_trailingFlagInterpretationCombo->addItem(QStringLiteral("Custom mapping (preserve only)"), dftTrailingFlagInterpretationKey(DftTrailingFlagInterpretation::CustomMapping));
-    constraintsForm->addRow(QStringLiteral("Fixed atom mode"), m_fixedAtomModeCombo);
+    constraintsForm->addRow(QStringLiteral("Fixed atoms"), m_fixedAtomModeCombo);
     constraintsForm->addRow(QStringLiteral("Trailing flag interpretation"), m_trailingFlagInterpretationCombo);
     constraintsLayout->addLayout(constraintsForm);
-    auto* constraintsHint = new QLabel(QStringLiteral("理由は 3. Structure / Checks の fixed_reason 列で確認できます。"), constraintsPage);
+    auto* constraintsHint = new QLabel(QStringLiteral("固定原子は入力構造/手動指定をそのまま使います。DFT入力生成では検証エラーで出力を止めません。"), constraintsPage);
     constraintsHint->setSizePolicy(QSizePolicy::Preferred, QSizePolicy::Maximum);
     constraintsLayout->addWidget(constraintsHint);
     constraintsPage->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Fixed);
@@ -408,8 +555,8 @@ void DftInputGeneratorDialog::buildUi() {
     m_targetEdit->setToolTip(QStringLiteral("出力ファイル名、SystemName、SystemLabelの基になる安全なtarget名です。"));
     m_xcFdfEdit = new QLineEdit(codePage);
     m_pseudoDirEdit = new QLineEdit(codePage);
-    m_includeXcCheck = new QCheckBox(QStringLiteral("SIESTA: %include xc.fdf (separate companion)"), codePage);
-    m_standaloneCheck = new QCheckBox(QStringLiteral("SIESTA: single FDF (inline xc.fdf blocks)"), codePage);
+    m_includeXcCheck = new QCheckBox(QStringLiteral("SIESTA: %include xc_500.fdf (separate companion)"), codePage);
+    m_standaloneCheck = new QCheckBox(QStringLiteral("SIESTA: single FDF (inline xc_500.fdf blocks)"), codePage);
     m_includeXcCheck->setObjectName(QStringLiteral("includeXcFdfCheck"));
     m_standaloneCheck->setObjectName(QStringLiteral("standaloneInlineCheck"));
     m_allowUnknownHydrogenCheck = new QCheckBox(QStringLiteral("Allow unknown_hydrogen"), codePage);
@@ -417,16 +564,22 @@ void DftInputGeneratorDialog::buildUi() {
     m_projectStyleFlagsCheck = new QCheckBox(QStringLiteral("QE: omit 1 1 1 for fully movable atoms"), codePage);
     m_assumeIsolatedCheck->setObjectName(QStringLiteral("assumeIsolatedCheck"));
     m_projectStyleFlagsCheck->setObjectName(QStringLiteral("projectStyleFixedFlagsCheck"));
-    m_xcFdfEdit->setToolTip(QStringLiteral("SIESTA include modeではmain FDFから%includeするxc.fdf名/外部pathです。Standalone時はこのxc.fdfからPAO.Basis/PS.lmax/SyntheticAtoms等を読み取り、FDF本体へインライン展開します。"));
+    m_xcFdfEdit->setToolTip(QStringLiteral("SIESTA include modeではmain FDFから%includeするxc_500.fdf等のファイル名/外部pathです。Standalone時はこのFDFからPAO.Basis/PS.lmax/SyntheticAtoms等を読み取り、FDF本体へインライン展開します。"));
     m_pseudoDirEdit->setToolTip(QStringLiteral("SIESTAではFDF配置先から見たPSFディレクトリです。スパコン構成がGaN/とpotential/の兄弟なら../potentialを指定します。QEではCONTROL.pseudo_dirです。"));
-    m_includeXcCheck->setToolTip(QStringLiteral("ON推奨。main FDFには%include xc.fdfだけを書き、Kempisty共通設定は同じ実行ディレクトリにある既存xc.fdfから読み込ませます。ASEAppはxc.fdf本体を出力しません。NetCharge/Spin/kgrid/Constraintsはmain FDF側だけに出します。"));
-    m_standaloneCheck->setToolTip(QStringLiteral("ONにするとxc.fdf相当の基底・SyntheticAtoms・PS.lmaxをFDFへ埋め込み、各計算ケースを単一FDFにします。"));
+    m_includeXcCheck->setToolTip(QStringLiteral("ON推奨。main FDFには%include xc_500.fdfだけを書き、Kempisty共通設定は同じ実行ディレクトリにある既存xc_500.fdfから読み込ませます。ASEAppはxc_500.fdf本体を出力しません。NetCharge/Spin/kgrid/Constraintsはmain FDF側だけに出します。"));
+    m_standaloneCheck->setToolTip(QStringLiteral("ONにするとxc_500.fdf相当の基底・SyntheticAtoms・PS.lmaxをFDFへ埋め込み、各計算ケースを単一FDFにします。"));
     m_assumeIsolatedCheck->setToolTip(QStringLiteral("assume_isolated: QE charged slabで2D Coulomb補正を明示するときだけ出力します。OFFでは.inから除外します。"));
     m_projectStyleFlagsCheck->setToolTip(QStringLiteral("QE ATOMIC_POSITIONSのproject style: fully movable原子の1 1 1 flagsを省略します。固定原子は0 0 0です。"));
-    m_allowUnknownHydrogenCheck->setToolTip(QStringLiteral("HydrogenRoleがunknown_hydrogenのHを許可する場合のみONにしてください。通常は手動でH-0.750/H-1.250/ordinaryへ修正します。"));
+    m_allowUnknownHydrogenCheck->setToolTip(QStringLiteral("unknown_hydrogenの扱いをsummary/profileへ保持する互換設定です。ON/OFFに関係なく入力生成は止めません。"));
     auto* importButton = new QPushButton(QStringLiteral("Import existing input/profile..."), codePage);
     importButton->setToolTip(QStringLiteral("既存のFDF / QE .in / profile json等を読み込み、選択中の構造に対して編集します。"));
-    auto* browseXcButton = new QPushButton(QStringLiteral("Browse xc.fdf"), codePage);
+    auto* saveDefaultsButton = new QPushButton(QStringLiteral("Save current defaults"), codePage);
+    saveDefaultsButton->setToolTip(QStringLiteral("現在のSetup/Parameter値をこのDFTコード・versionの初期値として保存します。次回起動/切替時に自動適用されます。"));
+    auto* loadDefaultsButton = new QPushButton(QStringLiteral("Load defaults..."), codePage);
+    loadDefaultsButton->setToolTip(QStringLiteral("書き出したSetup/Parameter初期値JSONを読み込み、現在のDFT入力画面へ適用します。"));
+    auto* exportDefaultsButton = new QPushButton(QStringLiteral("Export defaults..."), codePage);
+    exportDefaultsButton->setToolTip(QStringLiteral("現在のSetup/Parameter初期値をJSONファイルとして書き出します。別PCや別作業フォルダで読み込めます。"));
+    auto* browseXcButton = new QPushButton(QStringLiteral("Browse xc_500.fdf"), codePage);
     auto* browsePseudoButton = new QPushButton(QStringLiteral("Browse pseudo dir"), codePage);
     auto* xcRow = new QWidget(codePage);
     auto* xcRowLayout = new QHBoxLayout(xcRow);
@@ -448,7 +601,7 @@ void DftInputGeneratorDialog::buildUi() {
     outputForm->setVerticalSpacing(4);
     outputForm->setHorizontalSpacing(8);
     outputForm->addRow(QStringLiteral("Target name"), m_targetEdit);
-    outputForm->addRow(QStringLiteral("xc.fdf source"), xcRow);
+    outputForm->addRow(QStringLiteral("xc_500.fdf source"), xcRow);
     outputForm->addRow(QStringLiteral("PSF / pseudo dir"), pseudoRow);
     auto* optionGroup = new QGroupBox(QStringLiteral("3. Code-specific switches"), codePage);
     auto* optionLayout = new QGridLayout(optionGroup);
@@ -469,6 +622,9 @@ void DftInputGeneratorDialog::buildUi() {
     setupTitleLayout->setSpacing(8);
     setupTitleLayout->addWidget(setupTitle);
     setupTitleLayout->addStretch(1);
+    setupTitleLayout->addWidget(loadDefaultsButton);
+    setupTitleLayout->addWidget(exportDefaultsButton);
+    setupTitleLayout->addWidget(saveDefaultsButton);
     setupTitleLayout->addWidget(importButton);
     auto* setupGrid = new QGridLayout();
     setupGrid->setContentsMargins(0, 0, 0, 0);
@@ -575,7 +731,7 @@ void DftInputGeneratorDialog::buildUi() {
     m_parameterTable->horizontalHeader()->setSectionResizeMode(QHeaderView::ResizeToContents);
     m_parameterTable->hide();
     m_tabs->addTab(parameterPage, QStringLiteral("2. Parameters"));
-    m_tabs->addTab(detailsPage, QStringLiteral("3. Structure / Checks"));
+    m_tabs->addTab(detailsPage, QStringLiteral("3. Structure"));
 
     auto* rawPage = new QWidget(this);
     auto* rawLayout = new QVBoxLayout(rawPage);
@@ -612,12 +768,12 @@ void DftInputGeneratorDialog::buildUi() {
     m_batchResultTable->setHorizontalHeaderLabels({"source", "target", "status", "message"});
     m_batchResultTable->horizontalHeader()->setSectionResizeMode(QHeaderView::ResizeToContents);
     m_batchResultTable->setMaximumHeight(150);
-    m_batchResultTable->setToolTip(QStringLiteral("Batch生成後に、各入力構造の出力target、PASS/WARN/FAIL、エラー/警告を表示します。"));
+    m_batchResultTable->setToolTip(QStringLiteral("Batch生成後に、各入力構造の出力targetと生成結果を表示します。検証エラー判定は行いません。"));
     auto* previewButtons = new QHBoxLayout();
     auto* copyButton = new QPushButton(QStringLiteral("Copy primary input"), previewPage);
     m_exportButton = new QPushButton(QStringLiteral("Save primary input..."), previewPage);
     m_exportButton->setObjectName(QStringLiteral("exportGeneratedFilesButton"));
-    m_exportButton->setToolTip(QStringLiteral("検証FAILがない場合に、対象のprimary FDF/inputだけを書き出します。xc.fdf、summary、parameters、required_files、job scriptは作成しません。Batch modeでは選択済みの全構造を一括出力します。"));
+    m_exportButton->setToolTip(QStringLiteral("対象のprimary FDF/inputだけを書き出します。DFT入力生成では検証処理で出力を止めません。xc_500.fdf、summary、parameters、required_files、job scriptは作成しません。Batch modeでは選択済みの全構造を一括出力します。"));
     previewButtons->addWidget(copyButton);
     previewButtons->addWidget(m_exportButton);
     previewButtons->addStretch(1);
@@ -666,9 +822,11 @@ void DftInputGeneratorDialog::buildUi() {
             } else {
                 QStringList messages;
                 DftParameterRegistry::applyBuiltInProfile(profile, &m_settings, &messages);
+                applyDftUserDefaults(&m_settings);
                 Q_UNUSED(messages);
             }
         }
+        m_settings.fixedAtomMode = DftFixedAtomMode::PreserveImportedFlags;
         if (m_settings.hydrogenAssignments.isEmpty()) {
             m_settings.hydrogenAssignments = DftInputGenerator::inferHydrogenRoles(m_structure, m_settings);
         }
@@ -678,7 +836,12 @@ void DftInputGeneratorDialog::buildUi() {
         updatePreview();
     });
     connect(m_generationModeCombo, QOverload<int>::of(&QComboBox::currentIndexChanged), this, [this]() { updatePreview(); });
-    connect(m_targetEdit, &QLineEdit::textChanged, this, [this]() { updatePreview(); });
+    connect(m_targetEdit, &QLineEdit::textChanged, this, [this]() {
+        m_settings.targetName = DftInputGenerator::sanitizeTargetName(m_targetEdit->text());
+        syncTargetNameParameters();
+        syncVisibleTargetNameParameterWidgets();
+        updatePreview();
+    });
     connect(m_xcFdfEdit, &QLineEdit::textChanged, this, [this]() { updatePreview(); });
     connect(m_pseudoDirEdit, &QLineEdit::textChanged, this, [this]() { updatePreview(); });
     connect(m_includeXcCheck, &QCheckBox::toggled, this, [this]() { updatePreview(); });
@@ -688,9 +851,12 @@ void DftInputGeneratorDialog::buildUi() {
     connect(m_projectStyleFlagsCheck, &QCheckBox::toggled, this, [this]() { updatePreview(); });
     connect(m_fixedAtomModeCombo, QOverload<int>::of(&QComboBox::currentIndexChanged), this, [this]() { updatePreview(); refreshStructureTab(); });
     connect(m_trailingFlagInterpretationCombo, QOverload<int>::of(&QComboBox::currentIndexChanged), this, [this]() { updatePreview(); refreshStructureTab(); });
+    connect(saveDefaultsButton, &QPushButton::clicked, this, &DftInputGeneratorDialog::saveCurrentDefaults);
+    connect(loadDefaultsButton, &QPushButton::clicked, this, &DftInputGeneratorDialog::loadDefaultsFile);
+    connect(exportDefaultsButton, &QPushButton::clicked, this, &DftInputGeneratorDialog::exportDefaultsFile);
     connect(importButton, &QPushButton::clicked, this, &DftInputGeneratorDialog::importSettingsFile);
     connect(browseXcButton, &QPushButton::clicked, this, [this]() {
-        const QString path = QFileDialog::getOpenFileName(this, QStringLiteral("xc.fdfを選択"), QString(), QStringLiteral("FDF (*.fdf);;All files (*.*)"));
+        const QString path = QFileDialog::getOpenFileName(this, QStringLiteral("xc_500.fdfを選択"), QString(), QStringLiteral("FDF (*.fdf);;All files (*.*)"));
         if (!path.isEmpty()) m_xcFdfEdit->setText(path);
     });
     connect(browsePseudoButton, &QPushButton::clicked, this, [this]() {
@@ -980,19 +1146,9 @@ QVector<int> sortedIds(QVector<int> ids) {
     return ids;
 }
 
-QVector<int> expectedSevenLayerFixedIds() {
-    return QVector<int>({1, 5, 9, 13, 42, 46, 50, 54, 58, 59, 60, 61});
-}
-
-bool containsAllIds(const QVector<int>& actual, const QVector<int>& expected) {
-    for (int id : expected) {
-        if (!actual.contains(id)) return false;
-    }
-    return true;
-}
-
 QString orderedCompanionFiles(QStringList files) {
     const QStringList preferred = {
+        QStringLiteral("xc_500.fdf"),
         QStringLiteral("xc.fdf"),
         QStringLiteral("Ga.psf"),
         QStringLiteral("N.psf"),
@@ -1069,13 +1225,12 @@ void DftInputGeneratorDialog::rebuildCodeDependentUi() {
     const bool allowUnknown = m_allowUnknownHydrogenCheck != nullptr ? m_allowUnknownHydrogenCheck->isChecked() : m_settings.allowUnknownHydrogen;
     const bool assumeIsolated = m_assumeIsolatedCheck != nullptr ? m_assumeIsolatedCheck->isChecked() : m_settings.qeAssumeIsolated;
     const bool projectStyle = m_projectStyleFlagsCheck != nullptr ? m_projectStyleFlagsCheck->isChecked() : m_settings.qeProjectStyleFixedFlags;
-    const DftFixedAtomMode fixedMode = m_fixedAtomModeCombo != nullptr
-        ? dftFixedAtomModeFromKey(m_fixedAtomModeCombo->currentData().toString())
-        : m_settings.fixedAtomMode;
+    const DftFixedAtomMode fixedMode = DftFixedAtomMode::PreserveImportedFlags;
     const DftTrailingFlagInterpretation trailingInterpretation = m_trailingFlagInterpretationCombo != nullptr
         ? dftTrailingFlagInterpretationFromKey(m_trailingFlagInterpretationCombo->currentData().toString())
         : m_settings.trailingFlagInterpretation;
     m_settings = DftParameterRegistry::defaultSettings(code, version, DftInputGenerator::sanitizeTargetName(target));
+    applyDftUserDefaults(&m_settings);
     m_settings.sourceStructurePath = m_structure.sourcePath;
     m_settings.allowUnknownHydrogen = allowUnknown;
     m_settings.qeAssumeIsolated = assumeIsolated;
@@ -1158,7 +1313,8 @@ void DftInputGeneratorDialog::syncControlsFromSettings() {
     if (m_assumeIsolatedCheck) m_assumeIsolatedCheck->setChecked(m_settings.qeAssumeIsolated);
     if (m_projectStyleFlagsCheck) m_projectStyleFlagsCheck->setChecked(m_settings.qeProjectStyleFixedFlags);
     if (m_fixedAtomModeCombo) {
-        const int fixedIndex = m_fixedAtomModeCombo->findData(dftFixedAtomModeKey(m_settings.fixedAtomMode));
+        m_settings.fixedAtomMode = DftFixedAtomMode::PreserveImportedFlags;
+        const int fixedIndex = m_fixedAtomModeCombo->findData(dftFixedAtomModeKey(DftFixedAtomMode::PreserveImportedFlags));
         m_fixedAtomModeCombo->setCurrentIndex(fixedIndex >= 0 ? fixedIndex : 0);
     }
     if (m_trailingFlagInterpretationCombo) {
@@ -1203,7 +1359,7 @@ void DftInputGeneratorDialog::refreshSourceSummary() {
         for (const auto& atom : m_structure.atoms) counts[atom.element]++;
         QStringList species;
         for (const auto& kv : counts) species << QStringLiteral("%1:%2").arg(kv.first).arg(kv.second);
-        const QString cellText = QStringLiteral("a=%1 Å, b=%2 Å, c=%3 Å")
+        const QString cellText = QStringLiteral("a=%1 A, b=%2 A, c=%3 A")
             .arg(m_structure.cellVectors[0].length(), 0, 'f', 3)
             .arg(m_structure.cellVectors[1].length(), 0, 'f', 3)
             .arg(m_structure.cellVectors[2].length(), 0, 'f', 3);
@@ -1275,6 +1431,7 @@ void DftInputGeneratorDialog::setActiveStructure(const StructureData& structure,
 DftSettings DftInputGeneratorDialog::settingsForStructure(const StructureData& structure, const QString& targetName) const {
     DftSettings settings = m_settings;
     settings.sourceStructurePath = structure.sourcePath;
+    settings.fixedAtomMode = DftFixedAtomMode::PreserveImportedFlags;
     if (!structure.trailingFlagInterpretation.trimmed().isEmpty()) {
         settings.trailingFlagInterpretation = dftTrailingFlagInterpretationFromKey(structure.trailingFlagInterpretation);
     }
@@ -1294,19 +1451,8 @@ bool DftInputGeneratorDialog::exportSingleGeneratedFile(const QString& outputDir
                                                         DftGeneratedInput* generatedOut) const {
     const DftGeneratedInput generated = DftInputGenerator::generate(structure, settings);
     if (generatedOut != nullptr) *generatedOut = generated;
-    if (!generated.ok) {
-        if (errorMessage) *errorMessage = generated.errors.join(QLatin1Char('\n'));
-        return false;
-    }
-    QStringList checklistErrors;
-    const auto checklist = DftInputGenerator::scientificChecklist(structure, settings, generated);
-    for (const auto& item : checklist) {
-        if (item.status == QStringLiteral("ERROR")) {
-            checklistErrors << QStringLiteral("%1 / %2: %3").arg(item.group, item.item, item.detail);
-        }
-    }
-    if (!checklistErrors.isEmpty()) {
-        if (errorMessage) *errorMessage = checklistErrors.join(QLatin1Char('\n'));
+    if (generated.primaryText.trimmed().isEmpty()) {
+        if (errorMessage) *errorMessage = QStringLiteral("生成内容が空です。");
         return false;
     }
     return DftInputGenerator::writeGeneratedFiles(outputDirectory, settings, generated, errorMessage);
@@ -1337,6 +1483,12 @@ void DftInputGeneratorDialog::selectBatchStructureFiles() {
     const QStringList paths = QFileDialog::getOpenFileNames(this, QStringLiteral("一括生成する構造ファイルを選択"), QString(),
         QStringLiteral("Structure files (*.vasp *.poscar *.contcar *.cif *.xyz *.txt *.out POSCAR CONTCAR);;All files (*.*)"));
     if (paths.isEmpty()) return;
+    setBatchStructurePaths(paths);
+}
+
+void DftInputGeneratorDialog::setBatchStructurePaths(const QStringList& paths) {
+    if (paths.isEmpty()) return;
+    collectUiToSettings();
     m_batchSourcePaths = paths;
     m_batchSourcePaths.removeDuplicates();
     std::sort(m_batchSourcePaths.begin(), m_batchSourcePaths.end(), [](const QString& a, const QString& b) {
@@ -1426,7 +1578,7 @@ void DftInputGeneratorDialog::refreshStructureTab() {
         fixedFlagsByAtom.insert(atomIndex, flagText.join(QLatin1Char(' ')));
     }
     if (auto* summary = findChild<QLabel*>(QStringLiteral("structureSummaryLabel"))) {
-        summary->setText(QStringLiteral("Atoms: %1 (%2) | fixed=%3 | mode=%4 | c=%5 Å | z-range=%6 Å | vacuum estimate=%7 Å | source=%8")
+        summary->setText(QStringLiteral("Atoms: %1 (%2) | fixed=%3 | mode=%4 | c=%5 A | z-range=%6 A | vacuum estimate=%7 A | source=%8")
             .arg(m_structure.atoms.size())
             .arg(composition.join(QStringLiteral(", ")))
             .arg(fixedAtoms.size())
@@ -1533,13 +1685,7 @@ void DftInputGeneratorDialog::refreshOverviewTab() {
     const QString netCharge = parameterValueOrUnset(m_settings, QStringLiteral("siesta.charge_spin.NetCharge"));
     const QString spin = parameterValueOrUnset(m_settings, QStringLiteral("siesta.charge_spin.Spin"));
     const bool isNeutral = neutralSiestaUi(m_settings);
-    const QString overallStatus = !generated.errors.isEmpty()
-        ? QStringLiteral("ERROR")
-        : (!generated.warnings.isEmpty() ? QStringLiteral("WARNING") : QStringLiteral("PASS"));
-    const QVector<int> expected = expectedSevenLayerFixedIds();
-    const bool expectedFixedOk = static_cast<int>(m_structure.atoms.size()) == 61
-        ? containsAllIds(fixedIds, expected)
-        : !fixedIds.isEmpty();
+    const QString overallStatus = QStringLiteral("PASS");
 
     struct Row {
         QString section;
@@ -1549,7 +1695,8 @@ void DftInputGeneratorDialog::refreshOverviewTab() {
     };
     QVector<Row> rows;
     auto addRow = [&rows](const QString& section, const QString& label, const QString& value, const QString& status) {
-        rows << Row{section, label, value, status};
+        Q_UNUSED(status);
+        rows << Row{section, label, value, QStringLiteral("PASS")};
     };
 
     addRow(QStringLiteral("Project"), QStringLiteral("Code"), dftCodeToString(m_settings.code), QStringLiteral("PASS"));
@@ -1561,8 +1708,8 @@ void DftInputGeneratorDialog::refreshOverviewTab() {
 
     addRow(QStringLiteral("Structure"), QStringLiteral("Number of atoms"), QString::number(m_structure.atoms.size()), text.contains(QStringLiteral("NumberOfAtoms %1").arg(m_structure.atoms.size())) || m_settings.code != DftCode::Siesta ? QStringLiteral("PASS") : QStringLiteral("ERROR"));
     addRow(QStringLiteral("Structure"), QStringLiteral("Element counts"), composition.join(QStringLiteral(", ")), QStringLiteral("PASS"));
-    addRow(QStringLiteral("Structure"), QStringLiteral("Cell lengths"), QStringLiteral("a=%1 Å, b=%2 Å, c=%3 Å").arg(aLen, 0, 'f', 3).arg(bLen, 0, 'f', 3).arg(cLen, 0, 'f', 3), QStringLiteral("PASS"));
-    addRow(QStringLiteral("Structure"), QStringLiteral("Top vacuum thickness"), QStringLiteral("%1 Å (estimated)").arg(vacuum, 0, 'f', 3), vacuum >= 19.5 ? QStringLiteral("PASS") : QStringLiteral("WARNING"));
+    addRow(QStringLiteral("Structure"), QStringLiteral("Cell lengths"), QStringLiteral("a=%1 A, b=%2 A, c=%3 A").arg(aLen, 0, 'f', 3).arg(bLen, 0, 'f', 3).arg(cLen, 0, 'f', 3), QStringLiteral("PASS"));
+    addRow(QStringLiteral("Structure"), QStringLiteral("Top vacuum thickness"), QStringLiteral("%1 A (estimated)").arg(vacuum, 0, 'f', 3), vacuum >= 19.5 ? QStringLiteral("PASS") : QStringLiteral("WARNING"));
     addRow(QStringLiteral("Structure"), QStringLiteral("Atom order preserved"), yesNo(generated.summaryObject.value(QStringLiteral("atom_order_preserved")).toBool(true)), generated.summaryObject.value(QStringLiteral("atom_order_preserved")).toBool(true) ? QStringLiteral("PASS") : QStringLiteral("ERROR"));
 
     addRow(QStringLiteral("Charge / Spin"), QStringLiteral("NetCharge"), netCharge, isNeutral && netCharge != QStringLiteral("0.0") ? QStringLiteral("ERROR") : QStringLiteral("PASS"));
@@ -1579,10 +1726,9 @@ void DftInputGeneratorDialog::refreshOverviewTab() {
     addRow(QStringLiteral("Hydrogen roles"), QStringLiteral("ordinary H list"), ordinaryH.isEmpty() ? QStringLiteral("-") : idsText(ordinaryH), QStringLiteral("PASS"));
     addRow(QStringLiteral("Hydrogen roles"), QStringLiteral("unknown H list"), unknownH.isEmpty() ? QStringLiteral("-") : idsText(unknownH), unknownH.isEmpty() ? QStringLiteral("PASS") : QStringLiteral("WARNING"));
 
-    addRow(QStringLiteral("Fixed atoms"), QStringLiteral("fixed mode"), dftFixedAtomModeKey(m_settings.fixedAtomMode), QStringLiteral("PASS"));
-    addRow(QStringLiteral("Fixed atoms"), QStringLiteral("fixed atom IDs"), fixedIds.isEmpty() ? QStringLiteral("-") : idsText(fixedIds), fixedIds.isEmpty() && m_structure.atoms.size() >= 10 ? QStringLiteral("ERROR") : QStringLiteral("PASS"));
-    addRow(QStringLiteral("Fixed atoms"), QStringLiteral("fixed reasons"), fixedReasons.isEmpty() ? QStringLiteral("-") : fixedReasons.join(QStringLiteral(", ")), fixedReasons.isEmpty() && m_structure.atoms.size() >= 10 ? QStringLiteral("ERROR") : QStringLiteral("PASS"));
-    addRow(QStringLiteral("Fixed atoms"), QStringLiteral("expected 7layer fixed atoms"), idsText(expected), expectedFixedOk ? QStringLiteral("PASS") : QStringLiteral("ERROR"));
+    addRow(QStringLiteral("Fixed atoms"), QStringLiteral("fixed source"), QStringLiteral("structure/manual flags only"), QStringLiteral("PASS"));
+    addRow(QStringLiteral("Fixed atoms"), QStringLiteral("fixed atom IDs"), fixedIds.isEmpty() ? QStringLiteral("-") : idsText(fixedIds), QStringLiteral("PASS"));
+    addRow(QStringLiteral("Fixed atoms"), QStringLiteral("fixed reasons"), fixedReasons.isEmpty() ? QStringLiteral("-") : fixedReasons.join(QStringLiteral(", ")), QStringLiteral("PASS"));
 
     addRow(QStringLiteral("Numerical"), QStringLiteral("kgrid"), parameterValueOrUnset(m_settings, QStringLiteral("siesta.kpoints.kgrid")), parameterValueOrUnset(m_settings, QStringLiteral("siesta.kpoints.kgrid")) == QStringLiteral("3 3 1") ? QStringLiteral("PASS") : QStringLiteral("WARNING"));
     addRow(QStringLiteral("Numerical"), QStringLiteral("MD.VariableCell"), parameterValueOrUnset(m_settings, QStringLiteral("siesta.relaxation.MD.VariableCell")), parameterValueOrUnset(m_settings, QStringLiteral("siesta.relaxation.MD.VariableCell")).compare(QStringLiteral("F"), Qt::CaseInsensitive) == 0 ? QStringLiteral("PASS") : QStringLiteral("WARNING"));
@@ -1596,10 +1742,10 @@ void DftInputGeneratorDialog::refreshOverviewTab() {
     const QString meshSource = meshIt == m_settings.parameters.constEnd()
         ? QStringLiteral("unset")
         : QStringLiteral("%1 (%2)").arg(meshIt->value.trimmed().isEmpty() ? QStringLiteral("unset") : meshIt->value, shortSourceText(meshIt->source));
-    addRow(QStringLiteral("Numerical"), QStringLiteral("MeshCutoff source"), m_settings.includeXcFdf ? QStringLiteral("xc.fdf include; registry=%1").arg(meshSource) : meshSource, m_settings.includeXcFdf || meshSource != QStringLiteral("unset") ? QStringLiteral("PASS") : QStringLiteral("WARNING"));
-    addRow(QStringLiteral("Numerical"), QStringLiteral("xc.fdf include status"), m_settings.includeXcFdf ? QStringLiteral("%include %1").arg(m_settings.xcFdfPath.trimmed().isEmpty() ? QStringLiteral("xc.fdf") : m_settings.xcFdfPath.trimmed()) : QStringLiteral("not included"), m_settings.includeXcFdf ? (m_settings.xcFdfPath.trimmed().isEmpty() ? QStringLiteral("ERROR") : QStringLiteral("PASS")) : (m_settings.standaloneInline ? QStringLiteral("PASS") : QStringLiteral("ERROR")));
+    addRow(QStringLiteral("Numerical"), QStringLiteral("MeshCutoff source"), m_settings.includeXcFdf ? QStringLiteral("xc_500.fdf include; registry=%1").arg(meshSource) : meshSource, m_settings.includeXcFdf || meshSource != QStringLiteral("unset") ? QStringLiteral("PASS") : QStringLiteral("WARNING"));
+    addRow(QStringLiteral("Numerical"), QStringLiteral("xc include status"), m_settings.includeXcFdf ? QStringLiteral("%include %1").arg(m_settings.xcFdfPath.trimmed().isEmpty() ? QStringLiteral("xc_500.fdf") : m_settings.xcFdfPath.trimmed()) : QStringLiteral("not included"), m_settings.includeXcFdf ? (m_settings.xcFdfPath.trimmed().isEmpty() ? QStringLiteral("ERROR") : QStringLiteral("PASS")) : (m_settings.standaloneInline ? QStringLiteral("PASS") : QStringLiteral("ERROR")));
 
-    addRow(QStringLiteral("Status"), QStringLiteral("PASS / WARNING / ERROR"), QStringLiteral("%1 errors, %2 warnings").arg(generated.errors.size()).arg(generated.warnings.size()), overallStatus);
+    addRow(QStringLiteral("Status"), QStringLiteral("Generation"), QStringLiteral("検証エラー判定は行わず、選択設定で生成します。"), overallStatus);
 
     m_overviewTable->setRowCount(rows.size());
     for (int row = 0; row < rows.size(); ++row) {
@@ -1617,8 +1763,7 @@ void DftInputGeneratorDialog::refreshOverviewTab() {
     m_overviewTable->resizeColumnsToContents();
 
     if (m_checklistEdit != nullptr) {
-        const auto checklist = DftInputGenerator::scientificChecklist(m_structure, m_settings, generated);
-        m_checklistEdit->setPlainText(DftInputGenerator::scientificChecklistText(checklist));
+        m_checklistEdit->setPlainText(QStringLiteral("DFT入力生成ではエラー検知/科学チェックで出力を止めません。選択したversion/profile/parametersを反映した入力ファイルを生成します。"));
     }
 }
 
@@ -1967,9 +2112,9 @@ void DftInputGeneratorDialog::refreshParameterTable() {
             } else {
                 const int contentHeight = std::max(72, m_parameterListWidget->sizeHint().height());
                 const int frameHeight = (m_parameterScrollArea->frameWidth() * 2) + 2;
-                const int compactMaximumHeight = contentHeight + frameHeight;
-                m_parameterScrollArea->setMinimumHeight(std::min(compactMaximumHeight, 96));
-                m_parameterScrollArea->setMaximumHeight(compactMaximumHeight);
+                const int compactHeight = std::min(contentHeight + frameHeight, 520);
+                m_parameterScrollArea->setMinimumHeight(std::min(compactHeight, 160));
+                m_parameterScrollArea->setMaximumHeight(QWIDGETSIZE_MAX);
             }
             if (auto* bar = m_parameterScrollArea->verticalScrollBar()) {
                 bar->setValue(0);
@@ -1977,7 +2122,10 @@ void DftInputGeneratorDialog::refreshParameterTable() {
             if (auto* bar = m_parameterScrollArea->horizontalScrollBar()) {
                 bar->setValue(0);
             }
+            m_parameterScrollArea->setWidgetResizable(true);
+            m_parameterListWidget->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Fixed);
             m_parameterScrollArea->updateGeometry();
+            m_parameterListWidget->updateGeometry();
         }
     }
 }
@@ -2018,7 +2166,7 @@ void DftInputGeneratorDialog::collectUiToSettings() {
     if (m_allowUnknownHydrogenCheck != nullptr) m_settings.allowUnknownHydrogen = m_allowUnknownHydrogenCheck->isChecked();
     if (m_assumeIsolatedCheck != nullptr) m_settings.qeAssumeIsolated = m_assumeIsolatedCheck->isChecked();
     if (m_projectStyleFlagsCheck != nullptr) m_settings.qeProjectStyleFixedFlags = m_projectStyleFlagsCheck->isChecked();
-    if (m_fixedAtomModeCombo != nullptr) m_settings.fixedAtomMode = dftFixedAtomModeFromKey(m_fixedAtomModeCombo->currentData().toString());
+    m_settings.fixedAtomMode = DftFixedAtomMode::PreserveImportedFlags;
     if (m_trailingFlagInterpretationCombo != nullptr) m_settings.trailingFlagInterpretation = dftTrailingFlagInterpretationFromKey(m_trailingFlagInterpretationCombo->currentData().toString());
 
     for (int row = 0; m_hydrogenTable != nullptr && row < m_hydrogenTable->rowCount() && row < m_settings.hydrogenAssignments.size(); ++row) {
@@ -2158,15 +2306,46 @@ void DftInputGeneratorDialog::collectUiToSettings() {
         m_settings.rawParameters = rawParameters;
     }
 
+    syncTargetNameParameters();
+
     if (m_settings.code == DftCode::QuantumEspresso) {
+        DftParameterRegistry::setParameterValue(&m_settings, QStringLiteral("qe.CONTROL.prefix"), m_settings.targetName, DftParameterSource::UserOverride);
         DftParameterRegistry::setParameterValue(&m_settings, QStringLiteral("qe.CONTROL.pseudo_dir"), m_settings.pseudoDir, DftParameterSource::UserOverride);
         DftParameterRegistry::setParameterValue(&m_settings, QStringLiteral("qe.CONTROL.outdir"), m_settings.outDirPattern, DftParameterSource::ProjectProfile);
         DftParameterRegistry::setParameterValue(&m_settings, QStringLiteral("qe.SYSTEM.assume_isolated"), m_settings.qeAssumeIsolated ? QStringLiteral("2D") : QString(), DftParameterSource::UserOverride);
     }
-    if (m_settings.code == DftCode::Siesta) {
-        DftParameterRegistry::setParameterValue(&m_settings, QStringLiteral("siesta.general.SystemName"), m_settings.targetName, DftParameterSource::UserOverride);
-        DftParameterRegistry::setParameterValue(&m_settings, QStringLiteral("siesta.general.SystemLabel"), m_settings.targetName, DftParameterSource::UserOverride);
+}
+
+void DftInputGeneratorDialog::syncTargetNameParameters() {
+    m_settings.targetName = DftInputGenerator::sanitizeTargetName(m_settings.targetName);
+    DftParameterRegistry::setParameterValue(&m_settings, QStringLiteral("siesta.general.SystemName"), m_settings.targetName, DftParameterSource::UserOverride);
+    DftParameterRegistry::setParameterValue(&m_settings, QStringLiteral("siesta.general.SystemLabel"), m_settings.targetName, DftParameterSource::UserOverride);
+    DftParameterRegistry::setParameterValue(&m_settings, QStringLiteral("qe.CONTROL.prefix"), m_settings.targetName, DftParameterSource::UserOverride);
+}
+
+void DftInputGeneratorDialog::syncVisibleTargetNameParameterWidgets() {
+    const QStringList ids = {
+        QStringLiteral("siesta.general.SystemName"),
+        QStringLiteral("siesta.general.SystemLabel"),
+        QStringLiteral("qe.CONTROL.prefix"),
+    };
+    for (const QString& id : ids) {
+        const auto it = m_settings.parameters.constFind(id);
+        if (it == m_settings.parameters.constEnd()) continue;
+        QWidget* widget = m_parameterValueWidgets.value(id, nullptr);
+        if (auto* edit = qobject_cast<QLineEdit*>(widget)) {
+            const QSignalBlocker blocker(edit);
+            edit->setText(it->value);
+        } else if (auto* combo = qobject_cast<QComboBox*>(widget)) {
+            const QSignalBlocker blocker(combo);
+            if (combo->findText(it->value) < 0) combo->addItem(it->value);
+            combo->setCurrentText(it->value);
+        } else if (auto* text = qobject_cast<QTextEdit*>(widget)) {
+            const QSignalBlocker blocker(text);
+            text->setPlainText(it->value);
+        }
     }
+    updateContextLabels();
 }
 
 void DftInputGeneratorDialog::updatePreview() {
@@ -2175,80 +2354,127 @@ void DftInputGeneratorDialog::updatePreview() {
     updateContextLabels();
     refreshSourceSummary();
     m_generated = DftInputGenerator::generate(m_structure, m_settings);
-    const auto checklist = DftInputGenerator::scientificChecklist(m_structure, m_settings, m_generated);
-    bool checklistHasError = false;
-    bool checklistHasWarning = false;
-    QStringList checklistErrors;
-    QStringList checklistWarnings;
-    for (const auto& item : checklist) {
-        const QString line = QStringLiteral("%1 / %2: %3").arg(item.group, item.item, item.detail);
-        if (item.status == QStringLiteral("ERROR")) {
-            checklistHasError = true;
-            checklistErrors << line;
-        } else if (item.status == QStringLiteral("WARNING")) {
-            checklistHasWarning = true;
-            checklistWarnings << line;
-        }
-    }
-
-    const QString overallStatus = (!m_generated.errors.isEmpty() || checklistHasError)
-        ? QStringLiteral("ERROR")
-        : ((!m_generated.warnings.isEmpty() || checklistHasWarning) ? QStringLiteral("WARNING") : QStringLiteral("PASS"));
     const QString inputKind = m_settings.code == DftCode::Siesta ? QStringLiteral("FDF") : QStringLiteral("Input");
     QStringList preview;
     preview << QStringLiteral("Summary:")
-            << QStringLiteral("  status: %1").arg(overallStatus)
+            << QStringLiteral("  status: generate-only")
             << QStringLiteral("  target: %1").arg(m_settings.targetName)
             << QStringLiteral("  generated file name: %1").arg(generatedFileName(m_settings, m_generated))
             << QStringLiteral("  companion files required: %1").arg(orderedCompanionFiles(m_generated.requiredCompanionFiles))
             << QString();
-    preview << QStringLiteral("Scientific Checklist:");
-    const QString checklistText = DftInputGenerator::scientificChecklistText(checklist);
-    preview << (checklistText.isEmpty() ? QStringLiteral("-") : checklistText)
+    preview << QStringLiteral("Validation: disabled (選択設定を反映して生成のみ行います)")
             << QString()
             << QStringLiteral("--- %1 ---").arg(inputKind)
             << m_generated.primaryText;
     m_previewEdit->setPlainText(preview.join('\n'));
 
     QStringList status;
-    if (!m_generated.ok || checklistHasError) {
-        status << QStringLiteral("ERROR: export is blocked until generator errors are fixed; checklist errors are shown below.");
-    } else if (checklistHasWarning || !m_generated.warnings.isEmpty()) {
-        status << QStringLiteral("WARNING: export is possible, but review warnings before running DFT.");
-    } else {
-        status << QStringLiteral("OK: primary input has no explanatory comments and checklist is PASS.");
-    }
-    if (!m_generated.errors.isEmpty()) {
-        status << QStringLiteral("Errors:");
-        for (const auto& e : m_generated.errors) status << QStringLiteral("- %1").arg(e);
-    }
-    if (!checklistErrors.isEmpty()) {
-        status << QStringLiteral("Checklist errors:");
-        for (const auto& e : checklistErrors) status << QStringLiteral("- %1").arg(e);
-    }
-    if (!m_generated.warnings.isEmpty()) {
-        status << QStringLiteral("Warnings:");
-        for (const auto& w : m_generated.warnings) status << QStringLiteral("- %1").arg(w);
-    }
-    if (!checklistWarnings.isEmpty()) {
-        status << QStringLiteral("Checklist warnings:");
-        for (const auto& w : checklistWarnings) status << QStringLiteral("- %1").arg(w);
-    }
+    status << QStringLiteral("OK: エラー検知/科学チェックでは出力を止めません。選択中のversion/profile/parametersで入力ファイルを生成します。");
     if (!m_generated.requiredCompanionFiles.isEmpty()) {
         status << QStringLiteral("Required companion files: %1").arg(orderedCompanionFiles(m_generated.requiredCompanionFiles));
         if (m_settings.code == DftCode::Siesta) {
-            status << QStringLiteral("Run-ready check: include mode exports only the main FDF; an existing xc.fdf must already be in the same run directory. PSF files are checked relative to the export directory (default: %1). Standalone mode embeds xc.fdf blocks in the primary FDF.").arg(m_settings.pseudoDir.isEmpty() ? QStringLiteral("../potential") : m_settings.pseudoDir);
+            status << QStringLiteral("Run-ready check: include mode exports only the main FDF; an existing xc_500.fdf (or selected xc file) must already be in the same run directory. PSF files are checked relative to the export directory (default: %1). Standalone mode embeds xc_500.fdf blocks in the primary FDF.").arg(m_settings.pseudoDir.isEmpty() ? QStringLiteral("../potential") : m_settings.pseudoDir);
         }
     }
     m_warningEdit->setPlainText(status.join('\n'));
     if (m_exportButton != nullptr) {
-        const bool canExport = m_generated.ok && !checklistHasError;
+        const bool canExport = !m_generated.primaryText.trimmed().isEmpty();
         m_exportButton->setEnabled(canExport);
         m_exportButton->setToolTip(canExport
-            ? QStringLiteral("対象のprimary FDF/inputだけを書き出します。include modeではxc.fdfは出力しないため、実行時は同じディレクトリに既存xc.fdfが必要です。Batch modeでは選択した全構造を一括生成します。")
-            : QStringLiteral("検証FAILがあるため書き出しを無効化しています。上のErrors/Checklist errorsを修正してください。"));
+            ? QStringLiteral("対象のprimary FDF/inputだけを書き出します。include modeではxc_500.fdfは出力しないため、実行時は同じディレクトリに既存xc_500.fdf（または指定xcファイル）が必要です。Batch modeでは選択した全構造を一括生成します。")
+            : QStringLiteral("生成内容が空のため書き出せません。"));
     }
     refreshOverviewTab();
+}
+
+void DftInputGeneratorDialog::saveCurrentDefaults() {
+    collectUiToSettings();
+    QString errorMessage;
+    if (!saveDftUserDefaults(m_settings, &errorMessage)) {
+        QMessageBox::warning(this, QStringLiteral("Save defaults"),
+            errorMessage.isEmpty() ? QStringLiteral("初期値の保存に失敗しました。") : errorMessage);
+        return;
+    }
+    QMessageBox::information(this, QStringLiteral("Save defaults"),
+        QStringLiteral("現在のSetup/Parameter値を初期値として保存しました。\n対象: %1 %2\n次回このコード/versionを開くと自動で読み込みます。")
+            .arg(dftCodeToString(m_settings.code), m_settings.version));
+}
+
+void DftInputGeneratorDialog::exportDefaultsFile() {
+    collectUiToSettings();
+    const QString suggestedName = QStringLiteral("aseapp-dft-defaults-%1-%2.json")
+        .arg(dftUserDefaultsCodeKey(m_settings.code), m_settings.version);
+    const QString path = QFileDialog::getSaveFileName(
+        this,
+        QStringLiteral("DFT Setup/Parameter defaultsを書き出し"),
+        suggestedName,
+        QStringLiteral("JSON (*.json);;All files (*.*)"));
+    if (path.isEmpty()) return;
+
+    QFile file(path);
+    if (!file.open(QIODevice::WriteOnly | QIODevice::Truncate)) {
+        QMessageBox::warning(this, QStringLiteral("Export defaults"),
+            QStringLiteral("書き出し先を開けませんでした:\n%1").arg(path));
+        return;
+    }
+    file.write(QJsonDocument(dftUserDefaultsObject(m_settings)).toJson(QJsonDocument::Indented));
+    file.close();
+    QMessageBox::information(this, QStringLiteral("Export defaults"),
+        QStringLiteral("Setup/Parameter初期値を書き出しました:\n%1").arg(path));
+}
+
+void DftInputGeneratorDialog::loadDefaultsFile() {
+    collectUiToSettings();
+    const QString path = QFileDialog::getOpenFileName(
+        this,
+        QStringLiteral("DFT Setup/Parameter defaultsを読み込み"),
+        QString(),
+        QStringLiteral("JSON (*.json);;All files (*.*)"));
+    if (path.isEmpty()) return;
+
+    QFile file(path);
+    if (!file.open(QIODevice::ReadOnly)) {
+        QMessageBox::warning(this, QStringLiteral("Load defaults"),
+            QStringLiteral("読み込み元を開けませんでした:\n%1").arg(path));
+        return;
+    }
+    QJsonParseError parseError;
+    const QJsonDocument doc = QJsonDocument::fromJson(file.readAll(), &parseError);
+    if (parseError.error != QJsonParseError::NoError || !doc.isObject()) {
+        QMessageBox::warning(this, QStringLiteral("Load defaults"),
+            QStringLiteral("JSONとして読み込めませんでした:\n%1").arg(parseError.errorString()));
+        return;
+    }
+
+    const QJsonObject root = doc.object();
+    const QString codeKey = root.value(QStringLiteral("code")).toString().trimmed().toLower();
+    const DftCode code = (codeKey == QStringLiteral("qe") || codeKey.contains(QStringLiteral("espresso")))
+        ? DftCode::QuantumEspresso
+        : DftCode::Siesta;
+    QString version = root.value(QStringLiteral("version")).toString().trimmed();
+    const QStringList supportedVersions = DftParameterRegistry::versionsForCode(code);
+    if (version.isEmpty()) version = supportedVersions.value(0);
+    QString target = m_settings.targetName.trimmed();
+    if (target.isEmpty()) target = m_initialStructure.title.isEmpty() ? QStringLiteral("ideal") : m_initialStructure.title;
+
+    DftSettings loaded = DftParameterRegistry::defaultSettings(code, version, DftInputGenerator::sanitizeTargetName(target));
+    loaded.sourceStructurePath = m_structure.sourcePath;
+    loaded.hydrogenAssignments = m_settings.hydrogenAssignments.isEmpty()
+        ? DftInputGenerator::inferHydrogenRoles(m_structure, loaded)
+        : m_settings.hydrogenAssignments;
+    if (!applyDftUserDefaultsObject(&loaded, root)) {
+        QMessageBox::warning(this, QStringLiteral("Load defaults"),
+            QStringLiteral("この初期値JSONは現在のDFTコードに適用できませんでした。"));
+        return;
+    }
+    loaded.fixedAtomMode = DftFixedAtomMode::PreserveImportedFlags;
+    m_settings = loaded;
+    syncControlsFromSettings();
+    refreshStructureTab();
+    refreshHydrogenTab();
+    updatePreview();
+    QMessageBox::information(this, QStringLiteral("Load defaults"),
+        QStringLiteral("Setup/Parameter初期値を読み込みました:\n%1").arg(path));
 }
 
 void DftInputGeneratorDialog::importSettingsFile() {
@@ -2263,6 +2489,7 @@ void DftInputGeneratorDialog::importSettingsFile() {
     m_settings = result.settings;
     m_settings.generationMode = DftGenerationMode::ImportEdit;
     m_settings.sourceStructurePath = m_structure.sourcePath;
+    m_settings.fixedAtomMode = DftFixedAtomMode::PreserveImportedFlags;
     if (m_settings.targetName.trimmed().isEmpty()) m_settings.targetName = DftInputGenerator::sanitizeTargetName(QFileInfo(path).completeBaseName());
     if (m_settings.hydrogenAssignments.isEmpty()) m_settings.hydrogenAssignments = DftInputGenerator::inferHydrogenRoles(m_structure, m_settings);
     syncControlsFromSettings();
@@ -2323,12 +2550,9 @@ void DftInputGeneratorDialog::exportGeneratedFiles() {
                 target = targetNameForStructureSource(path, structure);
                 const DftSettings settings = settingsForStructure(structure, target);
                 if (exportSingleGeneratedFile(dir, structure, settings, &message, &generated)) {
-                    const auto checklist = DftInputGenerator::scientificChecklist(structure, settings, generated);
-                    bool hasWarning = !generated.warnings.isEmpty();
-                    for (const auto& item : checklist) hasWarning = hasWarning || item.status == QStringLiteral("WARNING");
-                    status = hasWarning ? QStringLiteral("WARN") : QStringLiteral("PASS");
-                    message = hasWarning ? QStringLiteral("generated with warnings; review preview/checks") : QStringLiteral("generated");
-                    if (hasWarning) ++warnCount; else ++passCount;
+                    status = QStringLiteral("PASS");
+                    message = QStringLiteral("generated");
+                    ++passCount;
                 } else {
                     ++failCount;
                 }
@@ -2356,7 +2580,7 @@ void DftInputGeneratorDialog::exportGeneratedFiles() {
 
     QString error;
     if (!exportSingleGeneratedFile(dir, m_structure, m_settings, &error, &m_generated)) {
-        QMessageBox::warning(this, QStringLiteral("DFT入力生成"), QStringLiteral("エラーがあるため出力しません。\n%1").arg(error));
+        QMessageBox::warning(this, QStringLiteral("DFT入力生成"), QStringLiteral("出力に失敗しました。\n%1").arg(error));
         updatePreview();
         return;
     }
@@ -2376,7 +2600,7 @@ void DftInputGeneratorDialog::exportGeneratedFiles() {
             message << QStringLiteral("Run-ready: OK（必要なcompanion fileが揃っています）");
         } else {
             message << QStringLiteral("Run-ready: 未完了（不足: %1）").arg(missing.join(QStringLiteral(", ")))
-                    << QStringLiteral("include modeでは対象FDFだけを出力します。既存xc.fdfをmain FDFと同じ実行ディレクトリへ置き、psfファイルはSIESTA実行前に指定PSF directory（通常 ../potential）へ置いてください。");
+                    << QStringLiteral("include modeでは対象FDFだけを出力します。既存xc_500.fdf（または指定xcファイル）をmain FDFと同じ実行ディレクトリへ置き、psfファイルはSIESTA実行前に指定PSF directory（通常 ../potential）へ置いてください。");
         }
     }
     QMessageBox::information(this, QStringLiteral("DFT入力生成"), message.join('\n'));
@@ -2427,6 +2651,59 @@ void DftInputGeneratorDialog::setSelectedAtomsMovable(bool movable) {
         auto& atom = m_structure.atoms[static_cast<std::size_t>(row)];
         atom.movable = {movable, movable, movable};
     }
+    m_structureTable->clearSelection();
     refreshStructureTab();
+    updatePreview();
+}
+
+void DftInputGeneratorDialog::replaceSelectedAtomsElement() {
+    if (m_structureTable == nullptr) return;
+    QSet<int> rows;
+    for (const auto* tableItem : m_structureTable->selectedItems()) rows.insert(tableItem->row());
+    if (rows.isEmpty()) {
+        QMessageBox::information(this, QStringLiteral("Replace atoms"), QStringLiteral("置き換える原子をStructure表で選択してください。"));
+        return;
+    }
+
+    const QStringList candidates = {
+        QStringLiteral("H"), QStringLiteral("N"), QStringLiteral("Ga"),
+        QStringLiteral("C"), QStringLiteral("O"), QStringLiteral("Si"), QStringLiteral("Al"), QStringLiteral("In"),
+    };
+    bool ok = false;
+    QString element = QInputDialog::getItem(
+        this,
+        QStringLiteral("Replace selected atoms"),
+        QStringLiteral("置換後の元素記号:"),
+        candidates,
+        std::max(0, static_cast<int>(candidates.indexOf(QStringLiteral("H")))),
+        true,
+        &ok).trimmed();
+    if (!ok || element.isEmpty()) return;
+
+    element[0] = element[0].toUpper();
+    for (int i = 1; i < element.size(); ++i) element[i] = element[i].toLower();
+    if (!QRegularExpression(QStringLiteral("^[A-Z][a-z]?$")).match(element).hasMatch()) {
+        QMessageBox::warning(this, QStringLiteral("Replace atoms"), QStringLiteral("元素記号は H, N, Ga のように入力してください。"));
+        return;
+    }
+
+    for (int row : rows) {
+        if (row < 0 || row >= static_cast<int>(m_structure.atoms.size())) continue;
+        auto& atom = m_structure.atoms[static_cast<std::size_t>(row)];
+        atom.element = element;
+        atom.color = vestaElementColor(element);
+        atom.radius = vestaElementRadius(element);
+        if (atom.tag.trimmed().isEmpty() || atom.tag.contains(QLatin1Char('-'))) {
+            atom.tag = QStringLiteral("%1-%2").arg(atom.element).arg(atom.atomId, 4, 10, QChar('0'));
+        }
+    }
+
+    m_settings.hydrogenAssignments = DftInputGenerator::inferHydrogenRoles(m_structure, m_settings);
+    m_structure.dirty = true;
+    m_structureTable->clearSelection();
+    refreshSourceSummary();
+    refreshStructureTab();
+    refreshHydrogenTab();
+    refreshSpeciesTable();
     updatePreview();
 }

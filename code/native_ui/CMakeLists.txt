@@ -85,9 +85,17 @@ set(ASEAPP_NATIVE_UI_COMMON_SOURCES
   src/DftInputTypes.h
   src/DftParameterRegistry.cpp
   src/DftParameterRegistry.h
+  src/SiestaResultsAnalyzer.cpp
+  src/SiestaResultsAnalyzer.h
+  src/SiestaFinalConversionDialog.cpp
+  src/SiestaFinalConversionDialog.h
+  src/SiestaFinalConverter.cpp
+  src/SiestaFinalConverter.h
   src/StructureFileLoader.cpp
   src/StructureFileLoader.h
   src/StructureData.h
+  src/VaspStructureWriter.cpp
+  src/VaspStructureWriter.h
   ${CMAKE_CURRENT_BINARY_DIR}/app_icons.qrc
   src/app_settings.qrc
   src/dft_profiles.qrc
@@ -299,6 +307,37 @@ if(BUILD_TESTING)
   )
   aseapp_prepare_windows_build_runtime(aseapp_dft_input_generator_self_test)
 
+  add_executable(aseapp_siesta_results_self_test
+    src/SiestaResultsAnalyzerSelfTestMain.cpp
+    src/SiestaResultsAnalyzer.cpp
+    src/SiestaResultsAnalyzer.h
+  )
+  target_include_directories(aseapp_siesta_results_self_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/src)
+  target_link_libraries(aseapp_siesta_results_self_test PRIVATE Qt6::Widgets Qt6::Gui Qt6::Core)
+  set_target_properties(aseapp_siesta_results_self_test PROPERTIES
+    OUTPUT_NAME "ASEappSiestaResultsSelfTest"
+  )
+  aseapp_prepare_windows_build_runtime(aseapp_siesta_results_self_test)
+
+  add_executable(aseapp_siesta_final_loader_self_test
+    src/StructureFileLoaderSelfTestMain.cpp
+    src/SiestaFinalConverter.cpp
+    src/SiestaFinalConverter.h
+    src/StructureFileLoader.cpp
+    src/StructureFileLoader.h
+    src/StructureData.h
+    src/VaspStructureWriter.cpp
+    src/VaspStructureWriter.h
+    src/ElementStyle.cpp
+    src/ElementStyle.h
+  )
+  target_include_directories(aseapp_siesta_final_loader_self_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/src)
+  target_link_libraries(aseapp_siesta_final_loader_self_test PRIVATE Qt6::Gui Qt6::Core)
+  set_target_properties(aseapp_siesta_final_loader_self_test PROPERTIES
+    OUTPUT_NAME "ASEappSiestaFinalLoaderSelfTest"
+  )
+  aseapp_prepare_windows_build_runtime(aseapp_siesta_final_loader_self_test)
+
   add_test(
     NAME adsorbate_pose_gui_self_test
     COMMAND $<TARGET_FILE:aseapp_adsorbate_pose_self_test>
@@ -343,6 +382,30 @@ if(BUILD_TESTING)
     TIMEOUT 60
     ENVIRONMENT "${ASEAPP_DFT_SELF_TEST_ENV}"
   )
+
+  add_test(
+    NAME siesta_results_analyzer_self_test
+    COMMAND $<TARGET_FILE:aseapp_siesta_results_self_test>
+  )
+  add_test(
+    NAME siesta_final_loader_self_test
+    COMMAND $<TARGET_FILE:aseapp_siesta_final_loader_self_test>
+  )
+  set_tests_properties(siesta_final_loader_self_test PROPERTIES TIMEOUT 30)
+  if(ASEAPP_TEST_ENV)
+    set_tests_properties(siesta_final_loader_self_test PROPERTIES ENVIRONMENT "${ASEAPP_TEST_ENV}")
+  endif()
+  set_tests_properties(siesta_results_analyzer_self_test PROPERTIES TIMEOUT 30)
+  set(ASEAPP_SIESTA_SELF_TEST_ENV)
+  if(ASEAPP_TEST_ENV)
+    list(APPEND ASEAPP_SIESTA_SELF_TEST_ENV "${ASEAPP_TEST_ENV}")
+  endif()
+  if(ASEAPP_GUI_QT_TEST_ENV)
+    list(APPEND ASEAPP_SIESTA_SELF_TEST_ENV ${ASEAPP_GUI_QT_TEST_ENV})
+  endif()
+  if(ASEAPP_SIESTA_SELF_TEST_ENV)
+    set_tests_properties(siesta_results_analyzer_self_test PROPERTIES ENVIRONMENT "${ASEAPP_SIESTA_SELF_TEST_ENV}")
+  endif()
 endif()
 
 install(FILES README.txt QUICKSTART.txt CHANGELOG.txt DESTINATION .)

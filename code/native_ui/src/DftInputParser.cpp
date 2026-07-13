@@ -292,7 +292,7 @@ DftImportResult DftInputParser::parseSiestaFdfText(const QString& text, const Df
         if (line.startsWith("%include", Qt::CaseInsensitive)) {
             r.settings.includeXcFdf = true;
             r.settings.xcFdfPath = line.section(QRegularExpression("\\s+"), 1).trimmed();
-            r.diffLines << QStringLiteral("include xc.fdf -> %1").arg(r.settings.xcFdfPath);
+            r.diffLines << QStringLiteral("include xc FDF -> %1").arg(r.settings.xcFdfPath);
             continue;
         }
         const QString key = line.section(QRegularExpression("\\s+"), 0, 0).trimmed();

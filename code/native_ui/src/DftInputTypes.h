@@ -151,7 +151,7 @@ struct DftSettings {
     QString moduleName = QStringLiteral("siesta/4.1.5-mpi");
     bool includeXcFdf = true;
     bool standaloneInline = false;
-    QString xcFdfPath = QStringLiteral("xc.fdf");
+    QString xcFdfPath = QStringLiteral("xc_500.fdf");
     QString pseudoDir = QStringLiteral("./qe_pp/");
     QString outDirPattern = QStringLiteral("./out/<target>");
     bool qeProjectStyleFixedFlags = true;

@@ -1,0 +1,117 @@
+ASEapp Surface Builder 繧ｯ繧､繝・け繧ｹ繧ｿ繝ｼ繝・
+======================================
+
+1. 襍ｷ蜍・
+------
+- 蜊倅ｽ鍋沿: ASEappSurfaceBuilder-1.3.4-Windows.exe 繧貞ｮ溯｡後＠縺ｾ縺吶・
+- 螻暮幕迚・ bin\ASEappNativeUI.exe 繧貞ｮ溯｡後＠縺ｾ縺吶・
+- Windows 縺ｧ逋ｺ陦悟・遒ｺ隱阪・隴ｦ蜻翫′蜃ｺ繧句ｴ蜷・ 蜷梧｢ｱ縺ｮ README-Windows.txt 繧堤｢ｺ隱阪＠縲・・蟶・・繧剃ｿ｡鬆ｼ縺ｧ縺阪ｋ蝣ｴ蜷医□縺・ASEapp-Windows-Trust-LocalCertificate.ps1 繧貞ｮ溯｡後＠縺ｾ縺吶・
+- macOS DMG 迚・ ASEappNativeUI.app 繧・Applications 縺ｸ繝峨Λ繝・げ縺励∝承繧ｯ繝ｪ繝・け縺ｾ縺溘・ Control + 繧ｯ繝ｪ繝・け縺ｧ縲碁幕縺上阪ｒ驕ｸ縺ｳ縺ｾ縺吶・
+
+2. 讒矩繧帝幕縺・
+------------
+- Open 繧呈款縺吶°縲∵ｧ矩繝輔ぃ繧､繝ｫ繧堤判髱｢縺ｸ繝峨Λ繝・げ&繝峨Ο繝・・縺励∪縺吶・
+- 2蝗樒岼莉･髯阪↓繧｢繝励Μ繧定ｵｷ蜍輔＠縺ｦ繧ょ挨繧ｦ繧｣繝ｳ繝峨え縺ｯ蠅励∴縺壹∵里蟄倥え繧｣繝ｳ繝峨え繧貞燕髱｢縺ｸ謌ｻ縺励∪縺吶・
+- Ctrl + T 縺ｧ遨ｺ縺ｮ繧ｿ繝悶ｒ霑ｽ蜉縲，trl + W 縺ｧ迴ｾ蝨ｨ縺ｮ繧ｿ繝悶ｒ髢峨§縺ｾ縺吶・
+- POSCAR / CONTCAR / .vasp / .xyz / .extxyz / .cif / .pdb / .xsf / .json / .aseproj / .vesta 縺ｫ蟇ｾ蠢懊＠縺ｦ縺・∪縺吶・
+- CIF 縺ｯ莉｣陦ｨ逧・↑蟇ｾ遘ｰ謫堺ｽ懊Ν繝ｼ繝励ｒ螻暮幕縺励※縲・撼蟇ｾ遘ｰ蜊倅ｽ阪□縺代〒縺ｪ縺丞腰菴崎・蜀・・蜴溷ｭ舌ｒ謠冗判縺励∪縺吶・
+- 繝帙う繝ｼ繝ｫ縺ｾ縺溘・繝医Λ繝・け繝代ャ繝峨・繝斐Φ繝√〒縲√き繝ｼ繧ｽ繝ｫ菴咲ｽｮ繧貞渕貅悶↓繧ｺ繝ｼ繝縺ｧ縺阪∪縺吶・
+- 蛻晄悄陦ｨ遉ｺ縺ｯ VESTA 鬚ｨ縺ｮ ball-and-stick 縺ｫ霑代▼縺代ｋ縺溘ａ縲∝次蟄舌Λ繝吶Ν縺ｯ繧ｪ繝輔〒縺吶ょｿ・ｦ√↑繧峨ヤ繝ｼ繝ｫ繝舌・縺ｮ縲後Λ繝吶Ν縲阪〒陦ｨ遉ｺ縺ｧ縺阪∪縺吶・
+- 繝懊Φ繝峨・荳｡遶ｯ蜴溷ｭ舌・濶ｲ縺ｧ蜊雁・縺壹▽縲∫ｫｯ縺九ｉ荳ｭ蠢・∪縺ｧ蜷後§螟ｪ縺輔〒陦ｨ遉ｺ縺輔ｌ縺ｾ縺吶・
+- 繝・・繝ｫ繝舌・縺ｾ縺溘・陦ｨ遉ｺ繝｡繝九Η繝ｼ縺ｮ縲梧ｼ蟄仙､悶阪〒縲〃ESTA鬚ｨ縺ｫ蜻ｨ譛溷｢・阜縺ｧ蜊倅ｽ肴ｼ蟄仙､悶∈邯壹￥隍・｣ｽ蜴溷ｭ舌→繝懊Φ繝峨ｒ陦ｨ遉ｺ/髱櫁｡ｨ遉ｺ縺ｧ縺阪∪縺吶・
+
+3. 蜴溷ｭ舌ｒ驕ｸ謚槭☆繧・
+----------------
+- 蟾ｦ繧ｯ繝ｪ繝・け: 蜴溷ｭ舌ｒ驕ｸ謚・
+- Ctrl + 蟾ｦ繧ｯ繝ｪ繝・け: 驕ｸ謚櫁ｿｽ蜉/隗｣髯､
+- Ctrl + 蟾ｦ繝峨Λ繝・げ: 驥阪↑縺｣縺溷･･縺ｮ蜴溷ｭ舌ｂ霑ｽ蜉驕ｸ謚・
+- Esc: 驕ｸ謚櫁ｧ｣髯､
+
+4. 蜴溷ｭ舌ｒ鄂ｮ縺・
+------------
+- 蜻ｨ譛溯｡ｨ繝懊ち繝ｳ縺ｧ蜈・ｴ繧帝∈縺ｳ縺ｾ縺吶・
+- 驟咲ｽｮ菴咲ｽｮ繧偵檎峩荳翫阪檎峩荳九阪悟次蟄宣俣縲阪悟､夂せ荳ｭ蠢・阪↑縺ｩ縺九ｉ驕ｸ縺ｳ縺ｾ縺吶・
+- Apply 繧呈款縺励∪縺吶・
+- 隍・焚驕ｸ謚樊凾縺ｮ逶ｴ荳・逶ｴ荳九・縲・∈謚槭＆繧後◆蜈ｨ蜴溷ｭ舌↓荳諡ｬ驕ｩ逕ｨ縺輔ｌ縺ｾ縺吶・
+
+5. 蜑埼ｧ・ｽ薙ｒ菴ｿ縺・
+--------------
+- 蜑埼ｧ・ｽ薙↓縺励◆縺・次蟄千ｾ､繧帝∈謚槭＠縺ｾ縺吶・
+- 蜑埼ｧ・ｽ鼎SV菫晏ｭ倥〒蜷咲ｧｰ繧貞・蜉帙＠縺ｦ菫晏ｭ倥＠縺ｾ縺吶・
+- 蜑埼ｧ・ｽ鼎SV隱ｭ霎ｼ縺ｧ隱ｭ縺ｿ霎ｼ繧縺ｨ縲∝錐遘ｰ荳隕ｧ縺悟燕鬧・ｽ薙ラ繝ｭ繝・・繝繧ｦ繝ｳ縺ｫ陦ｨ遉ｺ縺輔ｌ縺ｾ縺吶・
+- 逕滓・蜈・ｴ縺ｨ縺ｯ蛻･縺ｫ縲・・鄂ｮ縺励◆縺・燕鬧・ｽ灘錐繧貞燕鬧・ｽ薙ラ繝ｭ繝・・繝繧ｦ繝ｳ縺ｧ驕ｸ縺ｳ縺ｾ縺吶・
+- 騾壼ｸｸ縺ｮ蜴溷ｭ宣・鄂ｮ縺ｨ蜷後§縲碁・鄂ｮ菴咲ｽｮ縲阪ｒ驕ｸ縺ｳ縲∝燕鬧・ｽ馴・鄂ｮ縺ｧ縺昴・菴咲ｽｮ縺ｸ縺ｾ縺ｨ繧√※驟咲ｽｮ縺励∪縺吶・
+  蜑埼ｧ・ｽ灘・縺ｧ譛繧ゆｽ弱＞蜴溷ｭ舌′驟咲ｽｮ蜈医・蜴溽せ縺ｫ縺ｪ繧翫∪縺吶・
+
+6. 蜷ｸ逹蛻・ｭ舌・繝ｼ繧ｺ繧定ｪｿ謨ｴ縺吶ｋ
+--------------------------
+- 蜷ｸ逹蛻・ｭ舌・蜴溷ｭ千ｾ､繧帝∈謚槭＠縲∝精逹蛻・ｭ舌・繝ｼ繧ｺ邱ｨ髮・〒繧ｰ繝ｫ繝ｼ繝怜喧縺励∪縺吶・
+- 荳ｦ騾ｲ / 蝗櫁ｻ｢ / 邨仙粋髟ｷ縺ｮ謨ｰ蛟､繧貞・蜉帙＠縺ｾ縺吶・
+- 蠢・ｦ√↑譎ゅ□縺代後・繝ｼ繧ｺ繝励Ξ繝薙Η繝ｼ繧定｡ｨ遉ｺ縲阪ｒ繧ｪ繝ｳ縺ｫ縺励√・繝ｬ繝薙Η繝ｼ蟇ｾ雎｡繧帝∈繧薙〒 Apply 蠕後・蜊企乗・菴咲ｽｮ繧堤｢ｺ隱阪＠縺ｾ縺吶・
+- 蝠城｡後↑縺代ｌ縺ｰ縲御ｸｦ騾ｲ繧帝←逕ｨ縲阪悟屓霆｢繧帝←逕ｨ縲阪檎ｵ仙粋髟ｷ繧帝←逕ｨ縲阪ｒ謚ｼ縺励∪縺吶・
+- ASE 縺ｫ謌ｻ縺吝ｴ蜷医・ XYZ/extXYZ縲｝ose JSON縲、SE snippet 繧貞・蜉帙＠縺ｾ縺吶・
+
+7. 陦ｨ遉ｺ繝懊Φ繝峨・譛螟ｧ霍晞屬繧定ｪｿ謨ｴ縺吶ｋ
+----------------------------------
+- 繝・・繝ｫ繝舌・縺ｮ縲後・繝ｳ繝芽｡ｨ遉ｺ譛螟ｧ霍晞屬縲阪ｒ髢九″縺ｾ縺吶・
+- Ga-N縲；a-H縲¨-H 縺ｪ縺ｩ縲∝次蟄千ｨｮ繝壹い縺・陦後★縺､陦ｨ遉ｺ縺輔ｌ縺ｾ縺吶・
+- 蜈・ｴ繝壹い繧帝∈縺ｳ縲√瑚｡ｨ遉ｺ縺吶ｋ譛螟ｧ霍晞屬縲阪ｒ謖・ｮ壹＠縺ｦ驕ｩ逕ｨ縺励∪縺吶・
+- 蜴溷ｭ仙ｺｧ讓吶・螟画峩縺輔ｌ縺壹√・繝ｳ繝峨ｒ陦ｨ遉ｺ縺吶ｋ縺九←縺・°縺ｮ譛螟ｧ霍晞屬縺縺代′螟峨ｏ繧翫∪縺吶・
+
+8. slab 繧呈紛縺医ｋ
+---------------
+- Supercell 縺ｧ a/b/c 譁ｹ蜷代∈諡｡蠑ｵ縺励∪縺吶・
+- 45蠎ｦ蝗櫁ｻ｢縺ｪ縺ｩ縺悟ｿ・ｦ√↑蝣ｴ蜷医・縲梧ｼ蟄仙､画鋤陦悟・繧堤峩謗･蜈･蜉帙☆繧九阪ｒ繧ｪ繝ｳ縺ｫ縺励∽ｾ・`[1 1 0; -1 1 0; 0 0 1]` 縺ｮ繧医≧縺ｪ 3x3 謨ｴ謨ｰ陦悟・繧貞・蜉帙＠縺ｾ縺吶・
+- 逵溽ｩｺ螻､髯､蜴ｻ縺ｧ c 霆ｸ譁ｹ蜷代・菴吝・縺ｪ逵溽ｩｺ繧定ｩｰ繧√∪縺吶・
+- Supercell 蠕後↓逵溽ｩｺ螻､髯､蜴ｻ縺励※繧ゅ∝咲紫陦ｨ遉ｺ縺ｯ 1x1x1 縺ｫ謌ｻ繧翫∪縺帙ｓ縲・
+- 繧ｻ繝ｫ霆ｸ蛯ｾ縺阪〒 c 霆ｸ繧・a/b 譁ｹ蜷代∈蛯ｾ縺代《tep-terrace 蛟呵｣懊ｒ菴懊ｌ縺ｾ縺吶・
+- slab 蜈ｨ菴鍋ｧｻ蜍輔〒 a/b/c 譁ｹ蜷代∈菴咲ｽｮ繧定ｪｿ謨ｴ縺ｧ縺阪∪縺吶・
+
+9. 逋ｺ陦ｨ逕ｨ逕ｻ蜒上ｒ蜃ｺ縺・
+------------------
+- 蜴溷ｭ蝉ｸ隕ｧPNG 縺ｧ縲∵ｧ矩蜀・・邏縺ｮ逅・ｼ九Λ繝吶Ν逕ｻ蜒上ｒ蜃ｺ蜉帙＠縺ｾ縺吶・
+- 隲匁枚繝ｻ蟄ｦ莨夂畑縺ｫ縺ｯ 2000 px 莉･荳翫∪縺溘・ 300 dpi 莉･荳翫ｒ謗ｨ螂ｨ縺励∪縺吶・
+
+10. 菫晏ｭ・
+------
+- Save 縺ｧ CIF / POSCAR / extended XYZ / 騾壼ｸｸ XYZ 蠖｢蠑上→縺励※菫晏ｭ倥＠縺ｾ縺吶・
+- CIF 縺ｯ迴ｾ蝨ｨ陦ｨ遉ｺ荳ｭ縺ｮ蜈ｨ蜴溷ｭ舌→繧ｻ繝ｫ繧・P1 縺ｮ讒矩縺ｨ縺励※譖ｸ縺榊・縺励∪縺吶・
+- POSCAR 縺ｯ Direct / Cartesian縲・壼ｸｸ XYZ 縺ｯ Cartesian / 蛻・紫蠎ｧ讓吶ｒ驕ｸ謚槭〒縺阪∪縺吶・
+- 驥崎ｦ√↑讒矩縺ｯ縲∫ｷｨ髮・燕縺ｫ蛻･蜷堺ｿ晏ｭ倥＠縺ｦ縺翫￥縺ｨ螳牙・縺ｧ縺吶・
+- 蜴溷ｭ蝉ｸ隕ｧPNG縺ｯ縲∵ｨｪ繝励Ξ繝薙Η繝ｼ縲￣refix/Suffix縲∬｡ｨ遉ｺ鬆・Μ繧ｹ繝医ｒ遒ｺ隱阪＠縺ｦ縺九ｉ菫晏ｭ倥＠縺ｾ縺吶・
+
+UMA relaxation
+--------------
+- Open Settings > App settings > UMA.
+- Keep the Python command as `auto` (recommended). ASEapp first detects the
+  `uma_proj` conda environment, then another conda environment containing
+  fairchem-core. You can also specify C:\path\to\python.exe explicitly.
+- Set the default UMA checkpoint path, task name (default: oc20), device, fmax, and max steps.
+- Run Structure > UMA relaxation, or use the UMA relaxation button in the Supercell/Vacuum panel.
+  - Confirm or change the task, convergence threshold (fmax), max steps, device, and fixed-atom handling in the run-settings window, then start the run.
+  - The UMA live log window remains visible during execution and shows the FIRE step, energy, and fmax. A persistent copy is saved in the app-local `uma_logs` folder.
+  - Use Structure > UMA batch... to select multiple input files and apply the same UMA settings sequentially. Each result is saved beside its source as `<original name>_UMA.vasp`.
+- The current structure is exported to a temporary extXYZ file, relaxed by ASE/fairchem/UMA in a separate Python process, then loaded back into the canvas.
+- Dropping multiple local structure files onto the window loads all of them into separate tabs.
+- Use File > DFT input batch, choose multiple structures, configure the SIESTA/QE parameters once, and export to generate all inputs with that shared parameter set.
+
+SIESTA result analysis
+----------------------
+- Open File > SIESTA results (Ctrl+Alt+S).
+- Add one or more .out/.log files, add a folder recursively, or drag and drop files/folders into the analyzer.
+- Compare run status, geometry steps, E_KS/FreeEng, raw/constrained/residual force, force/DM/stress threshold ratios, stress tensor, cell parameters, and complete SCF histories.
+- Switch the convergence graph between energy, free energy, force/stress ratio, SCF iterations, DM ratio, and cell volume. Ratio thresholds are shown at 1.0.
+- The Convergence overview tab places Energy, Force/threshold, and final SCF dDmax/threshold side by side. The dashboard above them shows run state, latest energy/delta, and configured-vs-latest Force, SCF, and Stress values with color-coded PASS/not-converged status. Use the SCF convergence tab to select a geometry step and inspect its SCF energy and residual path; y=1 is the convergence boundary.
+- On any SIESTA graph, rotate the mouse wheel to zoom around the cursor and drag with the left mouse button to pan. Zooming back out stops at the initial full-data maximum; Reset or double-click restores that range immediately.
+- Enable 3-second auto refresh to monitor output files while SIESTA is running.
+- Export the multi-file summary, detailed geometry/SCF CSV, complete JSON, or the current graph as PNG.
+
+SIESTA final structure to VASP
+------------------------------
+- Open File > SIESTA final -> VASP (Ctrl+Shift+Alt+S).
+- Select or drag a final_structure.txt or SIESTA output into the conversion screen. Geometry analysis runs in the background; the screen previews atoms, elements, constraints, cell lengths, coordinate mode, and destination before conversion.
+- The importer uses an embedded STRUCT_OUT, XV, or final outcoor block and converts Bohr to Angstrom where required.
+- ChemicalSpeciesLabel virtual atoms (200 + Z), pseudo-H labels, and Geometry.Constraints are preserved; constraints are written as standard VASP Selective dynamics flags.
+- If the selected output has no physical cell, ASEapp first searches the same folder; use Change to select an FDF, SIESTA output, or VASP/POSCAR file when automatic detection is not possible.
+- The default output name uses the input file's SIESTA SystemLabel/Label (for example, `ideal_9layer.vasp`). If no label exists, ASEapp falls back to the source filename.
+- After saving, ASEapp automatically opens the generated VASP file in a structure tab.

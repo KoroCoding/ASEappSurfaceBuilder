@@ -27,7 +27,7 @@
     "customBondRanges": []
   },
   "uma": {
-    "pythonCommand": "python",
+    "pythonCommand": "auto",
     "modelPath": "",
     "taskName": "oc20",
     "device": "cuda",

@@ -1,18 +1,22 @@
 <RCC>
   <qresource prefix="/dft_profiles">
     <file alias="siesta/Kangawa_GaN_surface.profile.json">../assets/dft_profiles/siesta/Kangawa_GaN_surface.profile.json</file>
+    <file alias="siesta/xc_500.fdf">../assets/dft_profiles/siesta/xc_500.fdf</file>
     <file alias="siesta/xc.fdf">../assets/dft_profiles/siesta/xc.fdf</file>
     <file alias="siesta/4.1.5/Kangawa_GaN_neutral_slab/profile.json">../assets/dft_profiles/siesta/4.1.5/Kangawa_GaN_neutral_slab/profile.json</file>
     <file alias="siesta/4.1.5/Kangawa_GaN_neutral_slab/extracted_parameters.json">../assets/dft_profiles/siesta/4.1.5/Kangawa_GaN_neutral_slab/extracted_parameters.json</file>
     <file alias="siesta/4.1.5/Kangawa_GaN_neutral_slab/species_map.json">../assets/dft_profiles/siesta/4.1.5/Kangawa_GaN_neutral_slab/species_map.json</file>
+    <file alias="siesta/4.1.5/Kangawa_GaN_neutral_slab/xc_500.fdf">../assets/dft_profiles/siesta/4.1.5/Kangawa_GaN_neutral_slab/xc_500.fdf</file>
     <file alias="siesta/4.1.5/Kangawa_GaN_neutral_slab/xc.fdf">../assets/dft_profiles/siesta/4.1.5/Kangawa_GaN_neutral_slab/xc.fdf</file>
     <file alias="siesta/4.1.5/Kangawa_GaN_n_type_slab/profile.json">../assets/dft_profiles/siesta/4.1.5/Kangawa_GaN_n_type_slab/profile.json</file>
     <file alias="siesta/4.1.5/Kangawa_GaN_n_type_slab/extracted_parameters.json">../assets/dft_profiles/siesta/4.1.5/Kangawa_GaN_n_type_slab/extracted_parameters.json</file>
     <file alias="siesta/4.1.5/Kangawa_GaN_n_type_slab/species_map.json">../assets/dft_profiles/siesta/4.1.5/Kangawa_GaN_n_type_slab/species_map.json</file>
+    <file alias="siesta/4.1.5/Kangawa_GaN_n_type_slab/xc_500.fdf">../assets/dft_profiles/siesta/4.1.5/Kangawa_GaN_n_type_slab/xc_500.fdf</file>
     <file alias="siesta/4.1.5/Kangawa_GaN_n_type_slab/xc.fdf">../assets/dft_profiles/siesta/4.1.5/Kangawa_GaN_n_type_slab/xc.fdf</file>
     <file alias="siesta/4.1.5/Kangawa_GaN_p_type_slab/profile.json">../assets/dft_profiles/siesta/4.1.5/Kangawa_GaN_p_type_slab/profile.json</file>
     <file alias="siesta/4.1.5/Kangawa_GaN_p_type_slab/extracted_parameters.json">../assets/dft_profiles/siesta/4.1.5/Kangawa_GaN_p_type_slab/extracted_parameters.json</file>
     <file alias="siesta/4.1.5/Kangawa_GaN_p_type_slab/species_map.json">../assets/dft_profiles/siesta/4.1.5/Kangawa_GaN_p_type_slab/species_map.json</file>
+    <file alias="siesta/4.1.5/Kangawa_GaN_p_type_slab/xc_500.fdf">../assets/dft_profiles/siesta/4.1.5/Kangawa_GaN_p_type_slab/xc_500.fdf</file>
     <file alias="siesta/4.1.5/Kangawa_GaN_p_type_slab/xc.fdf">../assets/dft_profiles/siesta/4.1.5/Kangawa_GaN_p_type_slab/xc.fdf</file>
     <file alias="qe/Miyaguchi_Ga_reference.profile.json">../assets/dft_profiles/qe/Miyaguchi_Ga_reference.profile.json</file>
     <file alias="qe/Miyaguchi_GaN_neutral_slab.profile.json">../assets/dft_profiles/qe/Miyaguchi_GaN_neutral_slab.profile.json</file>

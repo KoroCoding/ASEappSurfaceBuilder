@@ -8,6 +8,7 @@
 #include <QJsonDocument>
 #include <QJsonObject>
 #include <QRegularExpression>
+#include <QSet>
 #include <QStringList>
 #include <QtMath>
 
@@ -549,6 +550,8 @@ void ensureCell(StructureData& data) {
     if (hasCell(data.cellVectors)) {
         return;
     }
+    const bool preserveCartesianOrigin = data.cellWasGenerated;
+    data.cellWasGenerated = true;
     if (data.atoms.empty()) {
         data.cellVectors = {QVector3D(10.0f, 0.0f, 0.0f), QVector3D(0.0f, 10.0f, 0.0f), QVector3D(0.0f, 0.0f, 10.0f)};
         return;
@@ -567,8 +570,10 @@ void ensureCell(StructureData& data) {
     const QVector3D margin(1.5f, 1.5f, 1.5f);
     const QVector3D shift = margin - minPoint;
     const QVector3D extents = (maxPoint - minPoint) + margin * 2.0f;
-    for (auto& atom : data.atoms) {
-        atom.cartesian += shift;
+    if (!preserveCartesianOrigin) {
+        for (auto& atom : data.atoms) {
+            atom.cartesian += shift;
+        }
     }
     data.cellVectors = {
         QVector3D(std::max(6.0f, extents.x()), 0.0f, 0.0f),
@@ -1322,10 +1327,12 @@ std::optional<std::array<QVector3D, 3>> siestaCellFromText(const QStringList& li
         }
         std::array<QVector3D, 3> cell{};
         int vectorCount = 0;
+        const float outputCellScale = trimmed.contains(QStringLiteral("Bohr"), Qt::CaseInsensitive)
+            ? 0.529177210903f : 1.0f;
         for (int j = i + 1; j < lines.size() && vectorCount < 3; ++j) {
             QVector3D vector;
             if (parseVector3Line(lines.at(j), &vector)) {
-                cell[static_cast<std::size_t>(vectorCount)] = vector;
+                cell[static_cast<std::size_t>(vectorCount)] = vector * outputCellScale;
                 ++vectorCount;
             } else if (vectorCount > 0 && !lines.at(j).trimmed().isEmpty()) {
                 break;
@@ -1339,92 +1346,197 @@ std::optional<std::array<QVector3D, 3>> siestaCellFromText(const QStringList& li
     return std::nullopt;
 }
 
-std::vector<NativeAtom> siestaRelaxedAtomsFromText(const QStringList& lines) {
+QString siestaElementFromLabel(const QString& label) {
+    const auto match = QRegularExpression(QStringLiteral("^\\s*([A-Za-z][a-z]?)")).match(label);
+    return match.hasMatch() ? normalizeElement(match.captured(1)) : QStringLiteral("X");
+}
+
+QString siestaElementFromAtomicNumber(int atomicNumber) {
+    static const QStringList symbols = QStringLiteral(
+        "X H He Li Be B C N O F Ne Na Mg Al Si P S Cl Ar K Ca Sc Ti V Cr Mn Fe Co Ni Cu Zn "
+        "Ga Ge As Se Br Kr Rb Sr Y Zr Nb Mo Tc Ru Rh Pd Ag Cd In Sn Sb Te I Xe Cs Ba La Ce Pr "
+        "Nd Pm Sm Eu Gd Tb Dy Ho Er Tm Yb Lu Hf Ta W Re Os Ir Pt Au Hg Tl Pb Bi Po At Rn Fr Ra "
+        "Ac Th Pa U Np Pu Am Cm Bk Cf Es Fm Md No Lr Rf Db Sg Bh Hs Mt Ds Rg Cn Nh Fl Mc Lv Ts Og")
+        .split(QLatin1Char(' '), Qt::SkipEmptyParts);
+    int z = std::abs(atomicNumber);
+    if (z >= 201 && z <= 318) z -= 200; // SIESTA virtual atom convention.
+    return z > 0 && z < symbols.size() ? symbols.at(z) : QStringLiteral("X");
+}
+
+QHash<int, QString> siestaSpeciesElements(const QStringList& lines) {
+    QHash<int, QString> result;
+    bool inBlock = false;
+    for (const QString& line : lines) {
+        const QString trimmed = line.trimmed();
+        if (trimmed.startsWith(QStringLiteral("%block"), Qt::CaseInsensitive)
+            && trimmed.contains(QStringLiteral("ChemicalSpeciesLabel"), Qt::CaseInsensitive)) {
+            inBlock = true;
+            continue;
+        }
+        if (inBlock && trimmed.startsWith(QStringLiteral("%endblock"), Qt::CaseInsensitive)) break;
+        if (!inBlock || trimmed.isEmpty() || trimmed.startsWith(QLatin1Char('#'))) continue;
+        const QStringList parts = tokenizeRespectingQuotes(trimmed);
+        if (parts.size() < 2) continue;
+        bool speciesOk = false, atomicOk = false;
+        const int species = parts.at(0).toInt(&speciesOk);
+        const int atomicNumber = parts.at(1).toInt(&atomicOk);
+        if (!speciesOk) continue;
+        QString element = parts.size() >= 3 ? siestaElementFromLabel(parts.at(2)) : QStringLiteral("X");
+        if (element == QStringLiteral("X") && atomicOk) element = siestaElementFromAtomicNumber(atomicNumber);
+        result.insert(species, element);
+    }
+    return result;
+}
+
+QString siestaResolvedElement(int species, int atomicNumber, const QString& label,
+                              const QHash<int, QString>& speciesElements) {
+    if (speciesElements.contains(species) && speciesElements.value(species) != QStringLiteral("X"))
+        return speciesElements.value(species);
+    const QString fromLabel = siestaElementFromLabel(label);
+    return fromLabel != QStringLiteral("X") ? fromLabel : siestaElementFromAtomicNumber(atomicNumber);
+}
+
+std::vector<NativeAtom> siestaMarkedGeometry(const QStringList& lines,
+                                              const QHash<int, QString>& speciesElements,
+                                              std::array<QVector3D, 3>* cell,
+                                              QString* sourceKind) {
+    constexpr double bohrToAngstrom = 0.529177210903;
+    // Match the standalone converter's deterministic priority: use the last
+    // valid STRUCT_OUT block first, then the last valid XV block.
+    for (int preferredKind = 0; preferredKind < 2; ++preferredKind) {
+      for (int marker = lines.size() - 1; marker >= 0; --marker) {
+        QString markerText = lines.at(marker).trimmed();
+        markerText.remove(QLatin1Char('-'));
+        markerText = markerText.trimmed().toLower();
+        const bool isStruct = markerText.endsWith(QStringLiteral(".struct_out"));
+        const bool isXv = markerText.endsWith(QStringLiteral(".xv"));
+        if ((preferredKind == 0 && !isStruct) || (preferredKind == 1 && !isXv)) continue;
+
+        int row = marker + 1;
+        while (row < lines.size() && lines.at(row).trimmed().isEmpty()) ++row;
+        std::array<QVector3D, 3> parsedCell{};
+        bool valid = true;
+        for (int axis = 0; axis < 3; ++axis, ++row) {
+            QVector3D vector;
+            if (row >= lines.size() || !parseVector3Line(lines.at(row), &vector)) { valid = false; break; }
+            parsedCell[static_cast<std::size_t>(axis)] = isXv ? vector * float(bohrToAngstrom) : vector;
+        }
+        if (!valid || !hasCell(parsedCell) || row >= lines.size()) continue;
+        bool countOk = false;
+        const int atomCount = tokenizeRespectingQuotes(lines.at(row++).trimmed()).value(0).toInt(&countOk);
+        if (!countOk || atomCount <= 0) continue;
+
+        std::vector<NativeAtom> atoms;
+        atoms.reserve(static_cast<std::size_t>(atomCount));
+        for (int atomIndex = 0; atomIndex < atomCount && row < lines.size(); ++atomIndex, ++row) {
+            const QStringList parts = tokenizeRespectingQuotes(lines.at(row).trimmed());
+            if (parts.size() < 5) { valid = false; break; }
+            bool speciesOk = false, atomicOk = false, xOk = false, yOk = false, zOk = false;
+            const int species = parts.at(0).toInt(&speciesOk);
+            const int atomicNumber = parts.at(1).toInt(&atomicOk);
+            const double x = parseStrictNumber(parts.at(2), &xOk);
+            const double y = parseStrictNumber(parts.at(3), &yOk);
+            const double z = parseStrictNumber(parts.at(4), &zOk);
+            if (!speciesOk || !xOk || !yOk || !zOk) { valid = false; break; }
+            NativeAtom atom;
+            atom.atomId = atomIndex + 1;
+            atom.element = siestaResolvedElement(species, atomicOk ? atomicNumber : 0, QString(), speciesElements);
+            const QVector3D coordinates{float(x), float(y), float(z)};
+            if (isStruct) {
+                atom.fractional = coordinates;
+                atom.cartesian = toCartesian(parsedCell, coordinates);
+            } else {
+                atom.cartesian = coordinates * float(bohrToAngstrom);
+            }
+            atoms.push_back(atom);
+        }
+        if (valid && static_cast<int>(atoms.size()) == atomCount) {
+            if (cell) *cell = parsedCell;
+            if (sourceKind) *sourceKind = isStruct ? QStringLiteral("STRUCT_OUT") : QStringLiteral("XV");
+            return atoms;
+        }
+      }
+    }
+    return {};
+}
+
+std::vector<NativeAtom> siestaRelaxedAtomsFromText(const QStringList& lines,
+                                                    const QHash<int, QString>& speciesElements) {
     const QString numberPattern = QStringLiteral("[-+]?(?:\\d+(?:\\.\\d*)?|\\.\\d+)(?:[EeDd][-+]?\\d+)?");
     const QRegularExpression atomLineRx(
         QStringLiteral("^\\s*(%1)\\s+(%1)\\s+(%1)\\s+(\\d+)\\s+(\\d+)\\s+([^\\s#]+)")
             .arg(numberPattern, numberPattern, numberPattern),
         QRegularExpression::CaseInsensitiveOption);
-
-    std::vector<NativeAtom> bestAtoms;
-    std::vector<NativeAtom> currentAtoms;
-    bool inRelaxedBlock = false;
-
-    auto finishCurrentBlock = [&]() {
-        if (!currentAtoms.empty()) {
-            bestAtoms = currentAtoms;
-            currentAtoms.clear();
-        }
-    };
-
+    std::vector<NativeAtom> bestAtoms, currentAtoms;
+    bool inBlock = false;
+    double coordinateScale = 1.0;
+    auto finish = [&]() { if (!currentAtoms.empty()) { bestAtoms = currentAtoms; currentAtoms.clear(); } };
     for (const QString& line : lines) {
         const QString trimmed = line.trimmed();
-        if (trimmed.startsWith(QStringLiteral("outcoor:"), Qt::CaseInsensitive) &&
-            trimmed.contains(QStringLiteral("coordinates"), Qt::CaseInsensitive)) {
-            finishCurrentBlock();
-            inRelaxedBlock = true;
+        if (trimmed.startsWith(QStringLiteral("outcoor:"), Qt::CaseInsensitive)
+            && trimmed.contains(QStringLiteral("coordinates"), Qt::CaseInsensitive)) {
+            finish(); inBlock = true;
+            coordinateScale = trimmed.contains(QStringLiteral("Bohr"), Qt::CaseInsensitive) ? 0.529177210903 : 1.0;
             continue;
         }
-        if (!inRelaxedBlock) {
-            continue;
-        }
-        if (trimmed.isEmpty()) {
-            finishCurrentBlock();
-            inRelaxedBlock = false;
-            continue;
-        }
+        if (!inBlock) continue;
+        if (trimmed.isEmpty()) { finish(); inBlock = false; continue; }
         const auto match = atomLineRx.match(line);
-        if (!match.hasMatch()) {
-            finishCurrentBlock();
-            inRelaxedBlock = false;
-            continue;
-        }
-
-        bool xOk = false;
-        bool yOk = false;
-        bool zOk = false;
-        bool atomIdOk = false;
-        const double x = parseStrictNumber(match.captured(1), &xOk);
-        const double y = parseStrictNumber(match.captured(2), &yOk);
-        const double z = parseStrictNumber(match.captured(3), &zOk);
-        const int atomId = match.captured(5).toInt(&atomIdOk);
-        if (!xOk || !yOk || !zOk) {
-            continue;
-        }
-
-        const QString label = match.captured(6).trimmed();
+        if (!match.hasMatch()) { finish(); inBlock = false; continue; }
+        bool xOk=false, yOk=false, zOk=false, speciesOk=false, atomIdOk=false;
+        const double x=parseStrictNumber(match.captured(1),&xOk), y=parseStrictNumber(match.captured(2),&yOk), z=parseStrictNumber(match.captured(3),&zOk);
+        const int species=match.captured(4).toInt(&speciesOk), atomId=match.captured(5).toInt(&atomIdOk);
+        if (!xOk || !yOk || !zOk) continue;
         NativeAtom atom;
-        atom.atomId = atomIdOk && atomId > 0 ? atomId : static_cast<int>(currentAtoms.size()) + 1;
-        atom.element = label;
-        atom.tag = QStringLiteral("%1-%2").arg(label).arg(atom.atomId, 4, 10, QChar('0'));
-        atom.cartesian = QVector3D(static_cast<float>(x), static_cast<float>(y), static_cast<float>(z));
+        atom.atomId = atomIdOk && atomId > 0 ? atomId : int(currentAtoms.size()) + 1;
+        const QString rawLabel = match.captured(6).trimmed();
+        atom.element = siestaResolvedElement(speciesOk ? species : 0, 0, rawLabel, speciesElements);
+        atom.tag = QStringLiteral("%1-%2").arg(rawLabel).arg(atom.atomId, 4, 10, QChar('0'));
+        atom.cartesian = QVector3D(float(x * coordinateScale), float(y * coordinateScale), float(z * coordinateScale));
         currentAtoms.push_back(atom);
     }
-    finishCurrentBlock();
+    finish();
     return bestAtoms;
+}
+
+void applySiestaConstraints(const QStringList& lines, std::vector<NativeAtom>* atoms) {
+    if (!atoms) return;
+    bool inBlock = false;
+    QSet<int> fixedIds;
+    for (const QString& line : lines) {
+        const QString trimmed = line.trimmed();
+        if (trimmed.startsWith(QStringLiteral("%block"), Qt::CaseInsensitive)
+            && trimmed.contains(QStringLiteral("Geometry.Constraints"), Qt::CaseInsensitive)) { inBlock = true; continue; }
+        if (inBlock && trimmed.startsWith(QStringLiteral("%endblock"), Qt::CaseInsensitive)) break;
+        if (!inBlock || !trimmed.startsWith(QStringLiteral("atom"), Qt::CaseInsensitive)) continue;
+        const QStringList parts = tokenizeRespectingQuotes(trimmed);
+        for (int i = 1; i < parts.size(); ++i) { bool ok=false; const int id=parts.at(i).toInt(&ok); if (ok && id>0) fixedIds.insert(id); }
+    }
+    for (auto& atom : *atoms) if (fixedIds.contains(atom.atomId)) atom.movable = {false, false, false};
 }
 
 std::optional<StructureData> loadSiestaFinalText(const QString& path, QString* errorMessage) {
     const QString text = readUtf8NoBom(path, errorMessage);
-    if (text.isEmpty()) {
-        return std::nullopt;
-    }
-    const QStringList lines = text.split(QRegularExpression(QStringLiteral("\r?\n")));
+    if (text.isEmpty()) return std::nullopt;
+    const QStringList lines = text.split(QRegularExpression(QStringLiteral("\\r?\\n")));
     StructureData data;
     data.sourcePath = path;
     data.title = siestaTextTitle(lines, QFileInfo(path).baseName());
+    const auto speciesElements = siestaSpeciesElements(lines);
 
-    const auto cell = siestaCellFromText(lines);
-    if (cell.has_value()) {
-        data.cellVectors = *cell;
-    }
-    data.atoms = siestaRelaxedAtomsFromText(lines);
+    QString sourceKind;
+    data.atoms = siestaMarkedGeometry(lines, speciesElements, &data.cellVectors, &sourceKind);
     if (data.atoms.empty()) {
-        if (errorMessage) {
-            *errorMessage = QStringLiteral("No SIESTA relaxed coordinate block was found. Expected a line like \"outcoor: Relaxed atomic coordinates (Ang):\".");
-        }
+        const auto cell = siestaCellFromText(lines);
+        if (cell.has_value()) data.cellVectors = *cell;
+        data.atoms = siestaRelaxedAtomsFromText(lines, speciesElements);
+    }
+    if (data.atoms.empty()) {
+        if (errorMessage) *errorMessage = QStringLiteral("No SIESTA final geometry was found (STRUCT_OUT, XV, or outcoor block).");
         return std::nullopt;
     }
+    applySiestaConstraints(lines, &data.atoms);
+    data.cellWasGenerated = !hasCell(data.cellVectors);
     finalizeAtoms(data);
     return data;
 }
@@ -1468,11 +1580,28 @@ std::optional<StructureData> StructureFileLoader::load(const QString& path, QStr
     if (suffix == "xsf") {
         return loadXsf(path, errorMessage);
     }
-    if (suffix == "txt" || suffix == "out") {
+    if (suffix == "txt" || suffix == "out" || suffix == "struct_out" || suffix == "xv" || suffix == "fdf") {
         return loadSiestaFinalText(path, errorMessage);
     }
     if (errorMessage) {
         *errorMessage = QStringLiteral("Unsupported file format for native loader: %1").arg(QFileInfo(path).suffix());
     }
     return std::nullopt;
+}
+
+std::optional<std::array<QVector3D, 3>> StructureFileLoader::loadCellVectors(
+    const QString& path, QString* errorMessage) const {
+    const QString suffix = suffixForPath(path);
+    if (suffix == QStringLiteral("vasp") || suffix == QStringLiteral("poscar") || suffix == QStringLiteral("contcar")) {
+        const auto structure = loadPoscar(path, errorMessage, StructureImportOptions{});
+        if (structure.has_value() && hasCell(structure->cellVectors)) return structure->cellVectors;
+        return std::nullopt;
+    }
+    const QString text = readUtf8NoBom(path, errorMessage);
+    if (text.isEmpty()) return std::nullopt;
+    const auto cell = siestaCellFromText(text.split(QRegularExpression(QStringLiteral("\r?\n"))));
+    if (!cell.has_value() && errorMessage) {
+        *errorMessage = QStringLiteral("No LatticeVectors or outcell unit-cell block was found in %1.").arg(path);
+    }
+    return cell;
 }

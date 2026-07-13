@@ -1,6 +1,6 @@
 {
   "schema_version": "aseapp.dft_extracted_parameters.v1",
-  "source_file": "xc.fdf",
+  "source_file": "xc_500.fdf",
   "code": "SIESTA",
   "version": "4.1.5",
   "source": "Kempisty_shared_xc_fdf",
@@ -34,8 +34,8 @@
       "source": "imported_xc_fdf"
     },
     "MeshCutoff": {
-      "value": "410 Ry",
-      "source": "imported_xc_fdf"
+      "value": "500 Ry",
+      "source": "imported_xc_500_fdf"
     },
     "PAO.SplitNorm": {
       "value": 0.3,

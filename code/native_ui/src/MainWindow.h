@@ -24,6 +24,8 @@ class StructureFileLoader;
 class QDragEnterEvent;
 class QDropEvent;
 class QTabBar;
+class QDialog;
+class QPlainTextEdit;
 
 class MainWindow : public QMainWindow {
     Q_OBJECT
@@ -42,6 +44,9 @@ private slots:
     void openStructure();
     void saveStructureAs();
     void showDftInputGenerator();
+    void showDftInputBatchGenerator();
+    void showSiestaResultsAnalyzer();
+    void convertSiestaFinalToVasp();
     void exportElementLegendImage();
     void showStartupGuide();
     void showUsageHelp();
@@ -57,6 +62,8 @@ private slots:
     void tiltCellAxis();
     void choosePlacementElement();
     void applySelectedPreset();
+    void replaceSelectedAtomsElement();
+    void placeRelativeToSelectedAtoms();
     void reloadPresetRegistry();
     void openPresetFile();
     void newEmptyTab();
@@ -74,6 +81,7 @@ private slots:
     void showMeasurementReport();
     void showStructureCheckReport();
     void optimizeStructureWithUma();
+    void optimizeFilesWithUmaBatch();
     void saveSelectedPrecursorCsv();
     void loadPrecursorCsv();
     void placeLoadedPrecursor();
@@ -186,6 +194,9 @@ private:
     void replaceStructureFromEdit(const StructureData& structure, const QString& label);
     void updateUndoRedoActions();
     QString structureDiagnosticsText(bool includeMeasurements) const;
+    QString beginUmaLog(const QString& title);
+    void appendUmaLog(const QString& text);
+    void finishUmaLog(const QString& message);
 
     StructureCanvas* m_canvas = nullptr;
     StructureFileLoader* m_loader = nullptr;
@@ -216,6 +227,9 @@ private:
     QAction* m_openAction = nullptr;
     QAction* m_saveAction = nullptr;
     QAction* m_dftInputAction = nullptr;
+    QAction* m_dftInputBatchAction = nullptr;
+    QAction* m_siestaResultsAction = nullptr;
+    QAction* m_siestaConvertAction = nullptr;
     QAction* m_newTabAction = nullptr;
     QAction* m_closeTabAction = nullptr;
     QAction* m_exportLegendAction = nullptr;
@@ -228,6 +242,7 @@ private:
     QAction* m_removeVacuumAction = nullptr;
     QAction* m_axisTiltAction = nullptr;
     QAction* m_umaOptimizeAction = nullptr;
+    QAction* m_umaBatchAction = nullptr;
     QAction* m_showCellAction = nullptr;
     QAction* m_showBondsAction = nullptr;
     QAction* m_showOutsideCellAction = nullptr;
@@ -243,6 +258,9 @@ private:
     QAction* m_languageAction = nullptr;
     QAction* m_undoAction = nullptr;
     QAction* m_redoAction = nullptr;
+    QDialog* m_umaLogDialog = nullptr;
+    QPlainTextEdit* m_umaLogEdit = nullptr;
+    QLabel* m_umaLogStatusLabel = nullptr;
     QCheckBox* m_showCellCheck = nullptr;
     QCheckBox* m_showBondsCheck = nullptr;
     QCheckBox* m_showOutsideCellCheck = nullptr;
@@ -272,6 +290,8 @@ private:
     QPushButton* m_openPresetButton = nullptr;
     QPushButton* m_clearSelectionButton = nullptr;
     QPushButton* m_deleteSelectedButton = nullptr;
+    QPushButton* m_replaceSelectedElementButton = nullptr;
+    QPushButton* m_placeRelativeButton = nullptr;
     QPushButton* m_fixSelectedButton = nullptr;
     QPushButton* m_unfixSelectedButton = nullptr;
     QPushButton* m_savePrecursorButton = nullptr;

@@ -271,6 +271,18 @@ QVector<int> siestaConstraintAtoms(const QString& text) {
     return atoms;
 }
 
+QVector<int> siestaConstraintAtomLineWidths(const QString& text) {
+    QVector<int> widths;
+    const QStringList lines = linesBetween(text, QStringLiteral("%block Geometry.Constraints"), QStringLiteral("%endblock Geometry.Constraints"));
+    for (const QString& line : lines) {
+        const QStringList parts = line.split(QRegularExpression(QStringLiteral("\\s+")), Qt::SkipEmptyParts);
+        if (!parts.isEmpty() && parts.first().compare(QStringLiteral("atom"), Qt::CaseInsensitive) == 0) {
+            widths << (parts.size() - 1);
+        }
+    }
+    return widths;
+}
+
 int psLmaxValue(const QString& text, const QString& label) {
     const QStringList blockRows = linesBetween(text, QStringLiteral("%block PS.lmax"), QStringLiteral("%endblock PS.lmax"));
     for (const QString& row : blockRows) {
@@ -330,6 +342,13 @@ bool sevenLayerHydrogenRolesAreBottom075(const QVector<DftHydrogenAssignment>& a
 bool containsWarning(const QStringList& warnings, const QString& text) {
     for (const auto& warning : warnings) {
         if (warning.contains(text, Qt::CaseInsensitive)) return true;
+    }
+    return false;
+}
+
+bool checklistItemHasStatus(const QVector<DftScientificChecklistItem>& items, const QString& item, const QString& status) {
+    for (const auto& entry : items) {
+        if (entry.item == item && entry.status.compare(status, Qt::CaseInsensitive) == 0) return true;
     }
     return false;
 }
@@ -595,7 +614,7 @@ int main(int argc, char** argv) {
     DftSettings siestaNeutral = DftParameterRegistry::defaultSettings(DftCode::Siesta, QStringLiteral("4.1.5"), QStringLiteral("ideal"));
     siestaNeutral.generationMode = DftGenerationMode::Manual;
     siestaNeutral.includeXcFdf = true;
-    siestaNeutral.xcFdfPath = QStringLiteral("xc.fdf");
+    siestaNeutral.xcFdfPath = QStringLiteral("xc_500.fdf");
     siestaNeutral.fixedAtomMode = DftFixedAtomMode::FixBottomPseudoHPlusBottomMolecularLayer;
     siestaNeutral.hydrogenAssignments = DftInputGenerator::inferHydrogenRoles(slab, siestaNeutral);
     DftGeneratedInput siestaNeutralOut = DftInputGenerator::generate(slab, siestaNeutral);
@@ -603,7 +622,7 @@ int main(int argc, char** argv) {
     if (!check(&ctx, DftInputGenerator::hasNoExplanatoryComments(siestaNeutralOut.primaryText, DftCode::Siesta), QStringLiteral("SIESTA neutral has no explanatory comments"), &result)) return result;
     if (!check(&ctx, integerValueForKey(siestaNeutralOut.primaryText, QStringLiteral("NumberOfAtoms")) == static_cast<int>(slab.atoms.size()), QStringLiteral("SIESTA neutral NumberOfAtoms matches structure"), &result)) return result;
     if (!check(&ctx, siestaAtomicSpeciesSequence(siestaNeutralOut.primaryText) == QVector<int>({1, 2, 3, 2, 3, 2, 3, 2, 3, 4}), QStringLiteral("SIESTA neutral atom order and species indices preserved"), &result)) return result;
-    if (!check(&ctx, siestaNeutralOut.primaryText.contains(QStringLiteral("%include xc.fdf")) && !siestaNeutralOut.primaryText.contains(QStringLiteral("%block ChemicalSpeciesLabel")) && !siestaNeutralOut.primaryText.contains(QStringLiteral("%block PAO.Basis")) && !siestaNeutralOut.primaryText.contains(QStringLiteral("%block SyntheticAtoms")), QStringLiteral("SIESTA neutral include mode avoids inline species/basis duplication"), &result)) return result;
+    if (!check(&ctx, siestaNeutralOut.primaryText.contains(QStringLiteral("%include xc_500.fdf")) && !siestaNeutralOut.primaryText.contains(QStringLiteral("%block ChemicalSpeciesLabel")) && !siestaNeutralOut.primaryText.contains(QStringLiteral("%block PAO.Basis")) && !siestaNeutralOut.primaryText.contains(QStringLiteral("%block SyntheticAtoms")), QStringLiteral("SIESTA neutral include mode avoids inline species/basis duplication"), &result)) return result;
     if (!check(&ctx, sortedCopy(siestaConstraintAtoms(siestaNeutralOut.primaryText)) == QVector<int>({1, 2, 3}), QStringLiteral("SIESTA neutral fixed native/pseudo-H atoms in Geometry.Constraints"), &result)) return result;
     if (!check(&ctx, siestaNeutralOut.summaryObject.contains(QStringLiteral("hydrogen_roles")) && siestaNeutralOut.summaryObject.contains(QStringLiteral("fixed_atoms")) && siestaNeutralOut.summaryObject.contains(QStringLiteral("movable_flags")) && siestaNeutralOut.summaryObject.contains(QStringLiteral("atom_order")), QStringLiteral("SIESTA neutral summary records judgments"), &result)) return result;
     Q_UNUSED(writeError);
@@ -622,10 +641,10 @@ int main(int argc, char** argv) {
     if (!check(&ctx, siestaChargedOut.primaryText.contains(QStringLiteral("NetCharge -0.25")) && siestaChargedOut.primaryText.contains(QStringLiteral("Spin polarized")) && siestaChargedOut.primaryText.contains(QStringLiteral("Spin.Fix F")) && !siestaChargedOut.primaryText.contains(QStringLiteral("Spin.Total")), QStringLiteral("SIESTA charged slab charge/spin fields correct"), &result)) return result;
     if (!check(&ctx, sortedCopy(siestaConstraintAtoms(siestaChargedOut.primaryText)) == QVector<int>({1, 2, 3}) && siestaCharged.hydrogenAssignments.size() == siestaNeutral.hydrogenAssignments.size(), QStringLiteral("SIESTA charged fixed atoms and H roles match neutral"), &result)) return result;
 
-    const QString xcPath = sourceFile(QStringLiteral("assets/dft_profiles/siesta/xc.fdf"));
+    const QString xcPath = sourceFile(QStringLiteral("assets/dft_profiles/siesta/xc_500.fdf"));
     const QString xcText = readTextFile(xcPath);
-    if (!check(&ctx, !xcText.isEmpty(), QStringLiteral("bundled xc.fdf is readable"), &result)) return result;
-    if (!check(&ctx, psLmaxValue(xcText, QStringLiteral("H-0.750")) == 2 && psLmaxValue(xcText, QStringLiteral("H-1.250")) == 2 && psLmaxValue(xcText, QStringLiteral("H")) == 2 && psLmaxValue(xcText, QStringLiteral("N")) == 2 && psLmaxValue(xcText, QStringLiteral("Ga")) == 2, QStringLiteral("bundled xc.fdf PS.lmax values are all 2"), &result)) return result;
+    if (!check(&ctx, !xcText.isEmpty(), QStringLiteral("bundled xc_500.fdf is readable"), &result)) return result;
+    if (!check(&ctx, psLmaxValue(xcText, QStringLiteral("H-0.750")) == 2 && psLmaxValue(xcText, QStringLiteral("H-1.250")) == 2 && psLmaxValue(xcText, QStringLiteral("H")) == 2 && psLmaxValue(xcText, QStringLiteral("N")) == 2 && psLmaxValue(xcText, QStringLiteral("Ga")) == 2, QStringLiteral("bundled xc_500.fdf PS.lmax values are all 2"), &result)) return result;
     DftSettings siestaStandaloneBase = DftParameterRegistry::defaultSettings(DftCode::Siesta, QStringLiteral("4.1.5"), QStringLiteral("ideal_standalone"));
     auto importedXc = DftInputParser::parseSiestaFdfText(xcText, siestaStandaloneBase, DftParameterSource::ImportedFile);
     DftSettings siestaStandalone = importedXc.settings;
@@ -637,7 +656,7 @@ int main(int argc, char** argv) {
     siestaStandalone.hydrogenAssignments = DftInputGenerator::inferHydrogenRoles(slab, siestaStandalone);
     DftGeneratedInput siestaStandaloneOut = DftInputGenerator::generate(slab, siestaStandalone);
     if (!check(&ctx, siestaStandaloneOut.ok, QStringLiteral("SIESTA standalone inline xc generates"), &result)) return result;
-    if (!check(&ctx, !siestaStandaloneOut.primaryText.contains(QStringLiteral("%include")) && siestaStandaloneOut.primaryText.contains(QStringLiteral("%block ChemicalSpeciesLabel")) && siestaStandaloneOut.primaryText.contains(QStringLiteral("%block PAO.Basis")) && siestaStandaloneOut.primaryText.contains(QStringLiteral("%block PS.lmax")) && psLmaxValue(siestaStandaloneOut.primaryText, QStringLiteral("H-0.750")) == 2 && psLmaxValue(siestaStandaloneOut.primaryText, QStringLiteral("H-1.250")) == 2 && psLmaxValue(siestaStandaloneOut.primaryText, QStringLiteral("H")) == 2 && psLmaxValue(siestaStandaloneOut.primaryText, QStringLiteral("N")) == 2 && psLmaxValue(siestaStandaloneOut.primaryText, QStringLiteral("Ga")) == 2 && siestaStandaloneOut.primaryText.contains(QStringLiteral("%block SyntheticAtoms")) && siestaStandaloneOut.primaryText.contains(QStringLiteral("MeshCutoff 410 Ry")), QStringLiteral("SIESTA standalone includes inline species/basis/PS.lmax=2/synthetic/mesh"), &result)) return result;
+    if (!check(&ctx, !siestaStandaloneOut.primaryText.contains(QStringLiteral("%include")) && siestaStandaloneOut.primaryText.contains(QStringLiteral("%block ChemicalSpeciesLabel")) && siestaStandaloneOut.primaryText.contains(QStringLiteral("%block PAO.Basis")) && siestaStandaloneOut.primaryText.contains(QStringLiteral("%block PS.lmax")) && psLmaxValue(siestaStandaloneOut.primaryText, QStringLiteral("H-0.750")) == 2 && psLmaxValue(siestaStandaloneOut.primaryText, QStringLiteral("H-1.250")) == 2 && psLmaxValue(siestaStandaloneOut.primaryText, QStringLiteral("H")) == 2 && psLmaxValue(siestaStandaloneOut.primaryText, QStringLiteral("N")) == 2 && psLmaxValue(siestaStandaloneOut.primaryText, QStringLiteral("Ga")) == 2 && siestaStandaloneOut.primaryText.contains(QStringLiteral("%block SyntheticAtoms")) && siestaStandaloneOut.primaryText.contains(QStringLiteral("MeshCutoff 500 Ry")), QStringLiteral("SIESTA standalone includes inline species/basis/PS.lmax=2/synthetic/mesh"), &result)) return result;
     if (!check(&ctx, countOccurrences(siestaStandaloneOut.primaryText, QStringLiteral("%block ChemicalSpeciesLabel")) == 1 && countOccurrences(siestaStandaloneOut.primaryText, QStringLiteral("%block SyntheticAtoms")) == 1, QStringLiteral("SIESTA standalone avoids duplicated generated species blocks"), &result)) return result;
     QTemporaryDir standaloneExportDir;
     if (!check(&ctx, standaloneExportDir.isValid() && DftInputGenerator::writeGeneratedFiles(standaloneExportDir.path(), siestaStandalone, siestaStandaloneOut, &writeError), QStringLiteral("SIESTA standalone writes primary FDF only"), &result)) return result;
@@ -646,7 +665,7 @@ int main(int argc, char** argv) {
     DftSettings sevenSiestaNeutral = DftParameterRegistry::defaultSettings(DftCode::Siesta, QStringLiteral("4.1.5"), QStringLiteral("7layer_ideal"));
     sevenSiestaNeutral.generationMode = DftGenerationMode::Manual;
     sevenSiestaNeutral.includeXcFdf = true;
-    sevenSiestaNeutral.xcFdfPath = QStringLiteral("xc.fdf");
+    sevenSiestaNeutral.xcFdfPath = QStringLiteral("xc_500.fdf");
     sevenSiestaNeutral.sourceStructurePath = sevenLayerPath;
     sevenSiestaNeutral.fixedAtomMode = DftFixedAtomMode::FixBottomPseudoHPlusBottomMolecularLayer;
     sevenSiestaNeutral.trailingFlagInterpretation = DftTrailingFlagInterpretation::PreserveOrIgnoreUnknown;
@@ -666,7 +685,14 @@ int main(int argc, char** argv) {
     if (!check(&ctx, siestaAtomicSpeciesSequence(sevenSiestaNeutralOut.primaryText) == sevenExpectedSiestaSpecies, QStringLiteral("7layer SIESTA atom_order preserved with H=1 N=2 Ga=3 species indices"), &result)) return result;
     const QVector<int> sevenSiestaConstraints = siestaConstraintAtoms(sevenSiestaNeutralOut.primaryText);
     if (!check(&ctx, sortedCopy(sevenSiestaConstraints) == expectedSevenFixedAtoms() && summaryFixedIndices(sevenSiestaNeutralOut.summaryObject) == expectedSevenFixedAtoms() && summaryFixedReason(sevenSiestaNeutralOut.summaryObject, 58) == QStringLiteral("bottom_pseudo_h") && summaryFixedReason(sevenSiestaNeutralOut.summaryObject, 42).startsWith(QStringLiteral("bottom_molecular_layer")), QStringLiteral("7layer SIESTA Geometry.Constraints fixes Ga 1/5/9/13, N 42/46/50/54, H 58-61 with reasons"), &result)) return result;
-    if (!check(&ctx, sevenSiestaNeutralOut.primaryText.contains(QStringLiteral("%include xc.fdf")) && !sevenSiestaNeutralOut.primaryText.contains(QStringLiteral("%block ChemicalSpeciesLabel")) && !sevenSiestaNeutralOut.primaryText.contains(QStringLiteral("%block PAO.Basis")) && !sevenSiestaNeutralOut.primaryText.contains(QStringLiteral("%block SyntheticAtoms")), QStringLiteral("7layer SIESTA neutral include mode has no duplicate species/basis/synthetic blocks"), &result)) return result;
+    StructureData allFixedSevenLayer = sevenLayer;
+    for (auto& atomValue : allFixedSevenLayer.atoms) atomValue.movable = {false, false, false};
+    DftSettings allFixedSevenSettings = sevenSiestaNeutral;
+    allFixedSevenSettings.fixedAtomMode = DftFixedAtomMode::PreserveImportedFlags;
+    allFixedSevenSettings.hydrogenAssignments = DftInputGenerator::inferHydrogenRoles(allFixedSevenLayer, allFixedSevenSettings);
+    const DftGeneratedInput allFixedSevenOut = DftInputGenerator::generate(allFixedSevenLayer, allFixedSevenSettings);
+    if (!check(&ctx, allFixedSevenOut.ok && siestaConstraintAtomLineWidths(allFixedSevenOut.primaryText) == QVector<int>({16, 16, 16, 13}) && sortedCopy(siestaConstraintAtoms(allFixedSevenOut.primaryText)).size() == 61, QStringLiteral("SIESTA Geometry.Constraints atom rows wrap at 16 fixed atoms per line"), &result)) return result;
+    if (!check(&ctx, sevenSiestaNeutralOut.primaryText.contains(QStringLiteral("%include xc_500.fdf")) && !sevenSiestaNeutralOut.primaryText.contains(QStringLiteral("%block ChemicalSpeciesLabel")) && !sevenSiestaNeutralOut.primaryText.contains(QStringLiteral("%block PAO.Basis")) && !sevenSiestaNeutralOut.primaryText.contains(QStringLiteral("%block SyntheticAtoms")), QStringLiteral("7layer SIESTA neutral include mode has no duplicate species/basis/synthetic blocks"), &result)) return result;
     if (!check(&ctx, summaryAtomOrderMatches(sevenLayer, sevenSiestaNeutralOut.summaryObject), QStringLiteral("7layer SIESTA summary atom_order preserves all 61 atoms"), &result)) return result;
     if (!check(&ctx, sevenSiestaNeutralOut.summaryObject.value(QStringLiteral("fixed_atom_mode")).toString() == QStringLiteral("bottom_pseudo_h_plus_bottom_molecular_layer") && sevenSiestaNeutralOut.summaryObject.value(QStringLiteral("trailing_flag_interpretation")).toString() == QStringLiteral("preserve_or_ignore_unknown") && sevenSiestaNeutralOut.summaryObject.value(QStringLiteral("fixed_atom_count")).toInt() == 12, QStringLiteral("7layer SIESTA summary records fixed mode, trailing flag interpretation, and fixed count"), &result)) return result;
     if (!check(&ctx, sevenSiestaNeutralOut.summaryObject.value(QStringLiteral("precision")).toObject().value(QStringLiteral("coordinate_precision")).toInt() == 10 && sevenSiestaNeutralOut.summaryObject.value(QStringLiteral("precision")).toObject().value(QStringLiteral("cell_precision")).toInt() == 10 && decimalPlacesForFirstNumberInBlock(sevenSiestaNeutralOut.primaryText, QStringLiteral("%block AtomicCoordinatesAndAtomicSpecies"), QStringLiteral("%endblock AtomicCoordinatesAndAtomicSpecies"), 0) == 10 && decimalPlacesForFirstNumberInBlock(sevenSiestaNeutralOut.primaryText, QStringLiteral("%block LatticeVectors"), QStringLiteral("%endblock LatticeVectors"), 0) == 10, QStringLiteral("7layer SIESTA default coordinate/cell precision is 10 digits and reflected in FDF"), &result)) return result;
@@ -712,7 +738,7 @@ int main(int argc, char** argv) {
     }
     const DftGeneratedInput hRoleOverrideOut = DftInputGenerator::generate(sevenLayer, hRoleOverride);
     const QVector<int> overrideSpecies = siestaAtomicSpeciesSequence(hRoleOverrideOut.primaryText);
-    if (!check(&ctx, !hRoleOverrideOut.ok && overrideSpecies.size() == 61 && overrideSpecies.at(57) == 4 && summaryFixedIndices(hRoleOverrideOut.summaryObject).contains(58) && containsWarning(hRoleOverrideOut.warnings, QStringLiteral("HydrogenRole manual override")) && summaryHydrogenOverride(hRoleOverrideOut.summaryObject, 58, true), QStringLiteral("7layer H role manual override is blocked when atom 58 becomes ordinary H species 4 while imported fixed flag is preserved"), &result)) return result;
+    if (!check(&ctx, hRoleOverrideOut.ok && overrideSpecies.size() == 61 && overrideSpecies.at(57) == 4 && summaryFixedIndices(hRoleOverrideOut.summaryObject).contains(58) && containsWarning(hRoleOverrideOut.warnings, QStringLiteral("HydrogenRole manual override")) && summaryHydrogenOverride(hRoleOverrideOut.summaryObject, 58, true), QStringLiteral("7layer H role manual override still generates when atom 58 becomes ordinary H species 4 while imported fixed flag is preserved"), &result)) return result;
     DftSettings hRoleRevert = hRoleOverride;
     for (auto& h : hRoleRevert.hydrogenAssignments) {
         if (h.atomIndex == 57) {
@@ -737,7 +763,21 @@ int main(int argc, char** argv) {
     manualOnly.fixedAtomMode = DftFixedAtomMode::ManualOnly;
     manualOnly.hydrogenAssignments = DftInputGenerator::inferHydrogenRoles(manualStructure, manualOnly);
     const DftGeneratedInput manualOnlyOut = DftInputGenerator::generate(manualStructure, manualOnly);
-    if (!check(&ctx, summaryFixedIndices(manualOnlyOut.summaryObject) == QVector<int>({7}) && summaryFixedReason(manualOnlyOut.summaryObject, 7) == QStringLiteral("manual_user_fixed"), QStringLiteral("Fixed atom mode manual_only fixes only user-marked atom with reason"), &result)) return result;
+    if (!check(&ctx, manualOnlyOut.ok && summaryFixedIndices(manualOnlyOut.summaryObject) == QVector<int>({7}) && summaryFixedReason(manualOnlyOut.summaryObject, 7) == QStringLiteral("manual_user_fixed"), QStringLiteral("Fixed atom mode manual_only fixes only user-marked atom with reason"), &result)) return result;
+    StructureData optionalUnfixedStructure = sevenLayer;
+    for (auto& atomValue : optionalUnfixedStructure.atoms) atomValue.movable = {true, true, true};
+    DftSettings optionalUnfixed = sevenSiestaNeutral;
+    optionalUnfixed.fixedAtomMode = DftFixedAtomMode::PreserveImportedFlags;
+    optionalUnfixed.hydrogenAssignments = DftInputGenerator::inferHydrogenRoles(optionalUnfixedStructure, optionalUnfixed);
+    const DftGeneratedInput optionalUnfixedOut = DftInputGenerator::generate(optionalUnfixedStructure, optionalUnfixed);
+    const QVector<DftScientificChecklistItem> optionalUnfixedChecklist = DftInputGenerator::scientificChecklist(optionalUnfixedStructure, optionalUnfixed, optionalUnfixedOut);
+    if (!check(&ctx,
+        optionalUnfixedOut.ok &&
+            siestaConstraintAtoms(optionalUnfixedOut.primaryText).isEmpty() &&
+            !checklistItemHasStatus(optionalUnfixedChecklist, QStringLiteral("bottom pseudo-H fixed"), QStringLiteral("ERROR")) &&
+            !checklistItemHasStatus(optionalUnfixedChecklist, QStringLiteral("bottom Ga-N molecular layer fixed"), QStringLiteral("ERROR")),
+        QStringLiteral("SIESTA bottom pseudo-H can remain unfixed when fixed mode only preserves imported flags"),
+        &result)) return result;
     StructureData importedFlagStructure = sevenLayer;
     importedFlagStructure.atoms.at(1).movable = {false, false, false};
     DftSettings preserveFlags = sevenSiestaNeutral;
@@ -880,7 +920,7 @@ int main(int argc, char** argv) {
     DftGeneratedInput unknownOut = DftInputGenerator::generate(unknownH, unknownSettings);
     unknownSettings.allowUnknownHydrogen = true;
     DftGeneratedInput unknownAllowedOut = DftInputGenerator::generate(unknownH, unknownSettings);
-    if (!check(&ctx, !unknownOut.ok && unknownAllowedOut.ok && containsWarning(unknownAllowedOut.warnings, QStringLiteral("unknown_hydrogen")), QStringLiteral("unknown_hydrogen blocks export unless explicitly allowed"), &result)) return result;
+    if (!check(&ctx, unknownOut.ok && unknownAllowedOut.ok, QStringLiteral("unknown_hydrogen no longer blocks DFT input generation"), &result)) return result;
 
     StructureData partial = slab;
     partial.atoms[3].movable = {true, false, true};
@@ -911,7 +951,7 @@ int main(int argc, char** argv) {
     if (!check(&ctx, parsedQe.ok && DftParameterRegistry::parameterValue(parsedQe.settings, QStringLiteral("qe.K_POINTS.automatic")) == QStringLiteral("3 3 1 0 0 0") && parsedQe.settings.parameters.value(QStringLiteral("qe.SYSTEM.nspin")).source == DftParameterSource::ImportedQeIn, QStringLiteral("QE .in import strips comments and records imported_qe_in source"), &result)) return result;
 
     const auto parsedFdf = DftInputParser::parseSiestaFdfText(QStringLiteral("SystemName test\n%block kgrid.Monkhorst_Pack\n  3 0 0 0\n  0 3 0 0\n  0 0 1 0\n%endblock kgrid.Monkhorst_Pack\n"), siestaNeutral, DftParameterSource::ImportedFile);
-    if (!check(&ctx, parsedFdf.ok && DftParameterRegistry::parameterValue(parsedFdf.settings, QStringLiteral("siesta.kpoints.kgrid")) == QStringLiteral("3 3 1"), QStringLiteral("xc.fdf/SIESTA FDF import parses kgrid block"), &result)) return result;
+    if (!check(&ctx, parsedFdf.ok && DftParameterRegistry::parameterValue(parsedFdf.settings, QStringLiteral("siesta.kpoints.kgrid")) == QStringLiteral("3 3 1"), QStringLiteral("xc FDF/SIESTA FDF import parses kgrid block"), &result)) return result;
     const auto parsedLog = DftInputParser::parseSiestaLogText(QStringLiteral("NetCharge -0.25\nSpin polarized\n"), siestaNeutral);
     if (!check(&ctx, parsedLog.ok && parsedLog.settings.parameters.value(QStringLiteral("siesta.charge_spin.NetCharge")).source == DftParameterSource::ImportedFdfLog, QStringLiteral("fdf-log import records imported_fdf_log source"), &result)) return result;
     const auto parsedJson = DftInputParser::parseProfileJsonText(QStringLiteral("{\"code\":\"qe\",\"fixed_atom_mode\":\"bottom_pseudo_h_only\",\"trailing_flag_interpretation\":\"numeric_one_means_fixed\",\"parameters\":{\"qe.SYSTEM.ecutwfc\":\"70\",\"qe.output.coordinate_precision\":\"16\"}}"), qeNeutral);
@@ -935,7 +975,7 @@ int main(int argc, char** argv) {
     rawQe.rawParameters << qeRawNamelist(QStringLiteral("SYSTEM"), QStringLiteral("input_dft"), QStringLiteral("PBE"));
     rawQe.rawParameters << qeRawNamelist(QStringLiteral("SYSTEM"), QStringLiteral("ecutwfc"), QStringLiteral("90"));
     DftGeneratedInput rawQeOut = DftInputGenerator::generate(slab, rawQe);
-    if (!check(&ctx, rawSiestaOut.ok && rawSiestaOut.primaryText.contains(QStringLiteral("User.DebugLabel raw-ok")) && !rawSiestaOut.primaryText.contains(QStringLiteral("PS.lmax H 1")) && !rawSiestaOut.primaryText.contains(QStringLiteral("MeshCutoff 999 Ry")) && containsWarning(rawSiestaOut.warnings, QStringLiteral("duplicates xc.fdf include key/block")), QStringLiteral("SIESTA Raw Additional keeps safe custom keys but skips xc.fdf duplicate keys in include mode"), &result)) return result;
+    if (!check(&ctx, rawSiestaOut.ok && rawSiestaOut.primaryText.contains(QStringLiteral("User.DebugLabel raw-ok")) && !rawSiestaOut.primaryText.contains(QStringLiteral("PS.lmax H 1")) && !rawSiestaOut.primaryText.contains(QStringLiteral("MeshCutoff 999 Ry")) && containsWarning(rawSiestaOut.warnings, QStringLiteral("duplicates xc FDF include key/block")), QStringLiteral("SIESTA Raw Additional keeps safe custom keys but skips xc FDF duplicate keys in include mode"), &result)) return result;
     if (!check(&ctx, rawQeOut.ok && rawQeOut.primaryText.contains(QStringLiteral("input_dft = 'PBE'")) && containsWarning(rawQeOut.warnings, QStringLiteral("duplicates generated QE key")), QStringLiteral("QE Raw Additional namelist key outputs and duplicate warning works"), &result)) return result;
 
     const auto siestaSpecs = DftParameterRegistry::specsForCode(DftCode::Siesta, QStringLiteral("4.1.5"));

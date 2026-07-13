@@ -23,6 +23,7 @@ class DftInputGeneratorDialog : public QDialog {
     Q_OBJECT
 public:
     explicit DftInputGeneratorDialog(const StructureData& structure, QWidget* parent = nullptr);
+    void setBatchStructurePaths(const QStringList& paths);
 
 private:
     void buildUi();
@@ -38,6 +39,9 @@ private:
     void refreshSourceSummary();
     void collectUiToSettings();
     void updatePreview();
+    void saveCurrentDefaults();
+    void loadDefaultsFile();
+    void exportDefaultsFile();
     void importSettingsFile();
     void exportGeneratedFiles();
     void selectStructureFile();
@@ -46,6 +50,9 @@ private:
     void applyHydrogenRoleToSelected(DftHydrogenRole role);
     void setBottomHydrogenRole(DftHydrogenRole role);
     void setSelectedAtomsMovable(bool movable);
+    void replaceSelectedAtomsElement();
+    void syncTargetNameParameters();
+    void syncVisibleTargetNameParameterWidgets();
     bool loadStructurePath(const QString& path, StructureData* structure, QString* errorMessage = nullptr) const;
     void setActiveStructure(const StructureData& structure, const QString& targetName, bool resetHydrogen);
     DftSettings settingsForStructure(const StructureData& structure, const QString& targetName) const;

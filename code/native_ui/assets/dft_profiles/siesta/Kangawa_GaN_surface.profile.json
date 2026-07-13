@@ -5,17 +5,20 @@
   "module_name": "siesta/4.1.5-mpi",
   "syntax_profile": "siesta_fdf_4_1",
   "include_xc_fdf": true,
-  "xc_fdf_path": "xc.fdf",
+  "xc_fdf_path": "xc_500.fdf",
   "standalone_inline": false,
   "pseudopotential_directory": "../potential",
   "calculation_mode": "neutral_slab",
   "parameters": {
     "siesta.charge_spin.NetCharge": "0.0",
     "siesta.charge_spin.Spin": "none",
-    "siesta.species.MeshCutoff": "410",
+    "siesta.species.MeshCutoff": "500",
     "siesta.species.xc.functional": "GGA",
     "siesta.species.xc.authors": "PBEJsJrLO",
-    "siesta.kpoints.kgrid": "3 3 1"
+    "siesta.kpoints.kgrid": "3 3 1",
+    "siesta.scf.DM.Tolerance": "1.d-5",
+    "siesta.relaxation.MD.MaxForceTol": "0.001",
+    "siesta.relaxation.MD.MaxDispl": "0.03"
   },
   "profile": "Kangawa_GaN_surface"
 }

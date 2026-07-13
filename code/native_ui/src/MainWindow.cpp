@@ -2,9 +2,12 @@
 
 #include "DftInputGeneratorDialog.h"
 #include "ElementStyle.h"
+#include "SiestaFinalConversionDialog.h"
+#include "SiestaResultsAnalyzer.h"
 #include "StructureCanvas.h"
 #include "StructureFileLoader.h"
 #include "SurfaceOperations.h"
+#include "VaspStructureWriter.h"
 
 #include <QAction>
 #include <QAbstractItemModel>
@@ -15,6 +18,7 @@
 #include <QComboBox>
 #include <QCoreApplication>
 #include <QDesktopServices>
+#include <QDateTime>
 #include <QDialog>
 #include <QDialogButtonBox>
 #include <QDragEnterEvent>
@@ -56,6 +60,7 @@
 #include <QProcess>
 #include <QProgressDialog>
 #include <QPointer>
+#include <QPlainTextEdit>
 #include <QPushButton>
 #include <QQuaternion>
 #include <QRadialGradient>
@@ -74,6 +79,7 @@
 #include <QTabWidget>
 #include <QTemporaryDir>
 #include <QTextStream>
+#include <QTextCursor>
 #include <QThread>
 #include <QToolBar>
 #include <QIcon>
@@ -146,6 +152,8 @@ bool editPreservesSupercellBase(const QString& label) {
         || label == QStringLiteral("remove_vacuum")
         || label == QStringLiteral("axis_tilt")
         || label == QStringLiteral("placement")
+        || label == QStringLiteral("replace_element")
+        || label == QStringLiteral("relative_placement")
         || label == QStringLiteral("precursor")
         || label == QStringLiteral("termination");
 }
@@ -285,6 +293,22 @@ QStringList periodicElementSymbols() {
         symbols << QString::fromLatin1(element.symbol);
     }
     return symbols;
+}
+
+QString canonicalElementSymbol(QString symbol) {
+    symbol = symbol.trimmed();
+    if (symbol.isEmpty()) {
+        return QStringLiteral("H");
+    }
+    for (const QString& candidate : periodicElementSymbols()) {
+        if (candidate.compare(symbol, Qt::CaseInsensitive) == 0) {
+            return candidate;
+        }
+    }
+    if (symbol.size() == 1) {
+        return symbol.toUpper();
+    }
+    return symbol.left(1).toUpper() + symbol.mid(1).toLower();
 }
 
 const PeriodicElementDetails* periodicElementDetails(const QString& symbol) {
@@ -748,10 +772,7 @@ bool isPoscarPath(const QString& path) {
         || suffix == QStringLiteral("contcar");
 }
 
-enum class CoordinateOutputMode {
-    Direct,
-    Cartesian
-};
+using CoordinateOutputMode = StructureCoordinateMode;
 
 CoordinateOutputMode askCoordinateOutputMode(QWidget* parent, bool japanese, bool vaspFormat, bool* accepted) {
     const QString directLabel = japanese ? QStringLiteral("Direct / 分率座標") : QStringLiteral("Direct / fractional");
@@ -788,63 +809,10 @@ bool atomHasFixedAxis(const NativeAtom& atom) {
 bool writePoscarFile(const StructureData& structure,
                      const QString& path,
                      CoordinateOutputMode coordinateMode,
-                     QString* errorMessage) {
-    QFile file(path);
-    if (!file.open(QIODevice::WriteOnly | QIODevice::Truncate | QIODevice::Text)) {
-        if (errorMessage != nullptr) {
-            *errorMessage = QStringLiteral("Failed to write %1").arg(path);
-        }
-        return false;
-    }
-
-    QStringList elements;
-    std::vector<int> counts;
-    for (const auto& atom : structure.atoms) {
-        const int index = elements.indexOf(atom.element);
-        if (index < 0) {
-            elements << atom.element;
-            counts.push_back(1);
-        } else {
-            counts[static_cast<std::size_t>(index)] += 1;
-        }
-    }
-
-    QTextStream out(&file);
-    out.setRealNumberNotation(QTextStream::FixedNotation);
-    out.setRealNumberPrecision(10);
-    out << (structure.title.isEmpty() ? QStringLiteral("ASEapp Surface Builder") : structure.title) << "\n";
-    out << "1.0\n";
-    for (const auto& vec : structure.cellVectors) {
-        out << QStringLiteral("  %1  %2  %3\n").arg(vec.x(), 16, 'f', 10).arg(vec.y(), 16, 'f', 10).arg(vec.z(), 16, 'f', 10);
-    }
-    out << "  " << elements.join(QStringLiteral("  ")) << "\n";
-    for (int count : counts) {
-        out << QStringLiteral("  %1").arg(count);
-    }
-    out << "\n";
-    out << (coordinateMode == CoordinateOutputMode::Cartesian ? "Cartesian\n" : "Direct\n");
-    for (const auto& element : elements) {
-        for (const auto& atom : structure.atoms) {
-            if (atom.element != element) {
-                continue;
-            }
-            const QVector3D coordinates = coordinateMode == CoordinateOutputMode::Cartesian
-                ? atom.cartesian
-                : atom.fractional;
-            out << QStringLiteral("  %1  %2  %3")
-                .arg(coordinates.x(), 16, 'f', 10)
-                .arg(coordinates.y(), 16, 'f', 10)
-                .arg(coordinates.z(), 16, 'f', 10);
-            if (atomHasFixedAxis(atom)) {
-                out << QStringLiteral("  %1  %2  %3")
-                    .arg(atom.movable[0] ? 0 : 1)
-                    .arg(atom.movable[1] ? 0 : 1)
-                    .arg(atom.movable[2] ? 0 : 1);
-            }
-            out << "\n";
-        }
-    }
-    return true;
+                     QString* errorMessage,
+                     bool standardSelectiveDynamics = false) {
+    return VaspStructureWriter().write(structure, path,
+        VaspWriteOptions{coordinateMode, standardSelectiveDynamics}, errorMessage);
 }
 
 QString cifDataBlockName(QString value) {
@@ -1317,13 +1285,91 @@ bool writeUmaConstraintFile(const StructureData& structure, const QString& path,
 
 struct UmaRelaxationOptions {
     QString modelPath;
-    QString pythonCommand = QStringLiteral("python");
+    QString pythonCommand = QStringLiteral("auto");
     QString taskName = QStringLiteral("oc20");
     QString device = QStringLiteral("cuda");
     double fmax = 0.05;
     int maxSteps = 500;
     bool fixSelectiveAtoms = true;
 };
+
+QString condaEnvironmentPython(const QString& environmentDir) {
+#ifdef Q_OS_WIN
+    return QDir(environmentDir).filePath(QStringLiteral("python.exe"));
+#else
+    return QDir(environmentDir).filePath(QStringLiteral("bin/python"));
+#endif
+}
+
+bool condaEnvironmentHasFairchem(const QString& environmentDir) {
+#ifdef Q_OS_WIN
+    return QDir(QDir(environmentDir).filePath(QStringLiteral("Lib/site-packages/fairchem"))).exists();
+#else
+    const QDir libDir(QDir(environmentDir).filePath(QStringLiteral("lib")));
+    for (const QString& pythonDir : libDir.entryList({QStringLiteral("python*")}, QDir::Dirs | QDir::NoDotAndDotDot)) {
+        if (QDir(libDir.filePath(pythonDir + QStringLiteral("/site-packages/fairchem"))).exists()) {
+            return true;
+        }
+    }
+    return false;
+#endif
+}
+
+QString discoverUmaPython() {
+    const QString configuredByEnvironment = qEnvironmentVariable("ASEAPP_UMA_PYTHON").trimmed();
+    if (!configuredByEnvironment.isEmpty() && QFileInfo::exists(configuredByEnvironment)) {
+        return QDir::toNativeSeparators(QFileInfo(configuredByEnvironment).absoluteFilePath());
+    }
+
+    QStringList environmentRoots;
+    const QString condaPrefix = qEnvironmentVariable("CONDA_PREFIX").trimmed();
+    if (!condaPrefix.isEmpty()) {
+        const QFileInfo prefixInfo(condaPrefix);
+        if (prefixInfo.dir().dirName().compare(QStringLiteral("envs"), Qt::CaseInsensitive) == 0) {
+            environmentRoots << prefixInfo.dir().absolutePath();
+        }
+    }
+    const QChar pathSeparator = QDir::listSeparator();
+    environmentRoots << qEnvironmentVariable("CONDA_ENVS_PATH").split(pathSeparator, Qt::SkipEmptyParts);
+    const QString home = QDir::homePath();
+    environmentRoots << QDir(home).filePath(QStringLiteral("anaconda3/envs"))
+                     << QDir(home).filePath(QStringLiteral("miniconda3/envs"))
+                     << QDir(home).filePath(QStringLiteral("mambaforge/envs"))
+                     << QDir(home).filePath(QStringLiteral("miniforge3/envs"));
+    environmentRoots.removeDuplicates();
+
+    // The documented ASEapp/UMA environment gets first priority. This also
+    // migrates existing settings whose old default was the unrelated PATH
+    // command "python".
+    for (const QString& root : std::as_const(environmentRoots)) {
+        const QString environmentDir = QDir(root).filePath(QStringLiteral("uma_proj"));
+        const QString python = condaEnvironmentPython(environmentDir);
+        if (QFileInfo::exists(python) && condaEnvironmentHasFairchem(environmentDir)) {
+            return QDir::toNativeSeparators(QFileInfo(python).absoluteFilePath());
+        }
+    }
+    for (const QString& root : std::as_const(environmentRoots)) {
+        const QDir rootDir(root);
+        for (const QString& name : rootDir.entryList(QDir::Dirs | QDir::NoDotAndDotDot, QDir::Name)) {
+            const QString environmentDir = rootDir.filePath(name);
+            const QString python = condaEnvironmentPython(environmentDir);
+            if (QFileInfo::exists(python) && condaEnvironmentHasFairchem(environmentDir)) {
+                return QDir::toNativeSeparators(QFileInfo(python).absoluteFilePath());
+            }
+        }
+    }
+    return QStringLiteral("python");
+}
+
+QString resolvedUmaPythonCommand(const QString& configuredCommand) {
+    const QString command = configuredCommand.trimmed();
+    if (command.isEmpty() || command.compare(QStringLiteral("auto"), Qt::CaseInsensitive) == 0
+        || command.compare(QStringLiteral("python"), Qt::CaseInsensitive) == 0
+        || command.compare(QStringLiteral("python.exe"), Qt::CaseInsensitive) == 0) {
+        return discoverUmaPython();
+    }
+    return command;
+}
 
 void populateUmaTaskCombo(QComboBox* combo, const QString& currentTask) {
     combo->setEditable(true);
@@ -1346,13 +1392,17 @@ void populateUmaDeviceCombo(QComboBox* combo, const QString& currentDevice) {
 UmaRelaxationOptions loadUmaRelaxationOptions() {
     UmaRelaxationOptions options;
     options.modelPath = appStringSetting({QStringLiteral("uma"), QStringLiteral("modelPath")}, QString()).trimmed();
-    options.pythonCommand = appStringSetting({QStringLiteral("uma"), QStringLiteral("pythonCommand")}, QStringLiteral("python")).trimmed();
+    options.pythonCommand = appStringSetting({QStringLiteral("uma"), QStringLiteral("pythonCommand")}, QStringLiteral("auto")).trimmed();
     options.taskName = appStringSetting({QStringLiteral("uma"), QStringLiteral("taskName")}, QStringLiteral("oc20")).trimmed();
     options.device = appStringSetting({QStringLiteral("uma"), QStringLiteral("device")}, QStringLiteral("cuda")).trimmed();
     options.fmax = std::max(0.001, appDoubleSetting({QStringLiteral("uma"), QStringLiteral("fmax")}, 0.05));
     options.maxSteps = std::max(1, appIntSetting({QStringLiteral("uma"), QStringLiteral("maxSteps")}, 500));
     options.fixSelectiveAtoms = appBoolSetting({QStringLiteral("uma"), QStringLiteral("fixSelectiveAtoms")}, true);
-    if (options.pythonCommand.isEmpty()) options.pythonCommand = QStringLiteral("python");
+    if (options.pythonCommand.isEmpty()
+        || options.pythonCommand.compare(QStringLiteral("python"), Qt::CaseInsensitive) == 0
+        || options.pythonCommand.compare(QStringLiteral("python.exe"), Qt::CaseInsensitive) == 0) {
+        options.pythonCommand = QStringLiteral("auto");
+    }
     if (options.taskName.isEmpty()) options.taskName = QStringLiteral("oc20");
     if (options.device.isEmpty()) options.device = QStringLiteral("cuda");
     return options;
@@ -1360,7 +1410,7 @@ UmaRelaxationOptions loadUmaRelaxationOptions() {
 
 void saveUmaRelaxationOptions(const UmaRelaxationOptions& options) {
     setAppSettingValue({QStringLiteral("uma"), QStringLiteral("modelPath")}, options.modelPath.trimmed());
-    setAppSettingValue({QStringLiteral("uma"), QStringLiteral("pythonCommand")}, options.pythonCommand.trimmed().isEmpty() ? QStringLiteral("python") : options.pythonCommand.trimmed());
+    setAppSettingValue({QStringLiteral("uma"), QStringLiteral("pythonCommand")}, options.pythonCommand.trimmed().isEmpty() ? QStringLiteral("auto") : options.pythonCommand.trimmed());
     setAppSettingValue({QStringLiteral("uma"), QStringLiteral("taskName")}, options.taskName.trimmed().isEmpty() ? QStringLiteral("oc20") : options.taskName.trimmed());
     setAppSettingValue({QStringLiteral("uma"), QStringLiteral("device")}, options.device.trimmed().isEmpty() ? QStringLiteral("cuda") : options.device.trimmed());
     setAppSettingValue({QStringLiteral("uma"), QStringLiteral("fmax")}, std::max(0.001, options.fmax));
@@ -1408,8 +1458,8 @@ bool showUmaRelaxationOptionsDialog(QWidget* parent, bool japanese, UmaRelaxatio
 
     auto* pythonCommandEdit = new QLineEdit(options->pythonCommand, &dialog);
     pythonCommandEdit->setToolTip(japanese
-        ? QStringLiteral("Examples: python / conda run -n uma_proj python / C:\\path\\to\\python.exe")
-        : QStringLiteral("Examples: python / conda run -n uma_proj python / C:\\path\\to\\python.exe"));
+        ? QStringLiteral("auto（推奨）: fairchem を含む uma_proj 環境を自動検出。例: C:\\path\\to\\python.exe")
+        : QStringLiteral("auto (recommended) detects uma_proj/fairchem. Example: C:\\path\\to\\python.exe"));
     form->addRow(japanese ? QStringLiteral("Python command") : QStringLiteral("Python command"), pythonCommandEdit);
 
     auto* taskCombo = new QComboBox(&dialog);
@@ -1453,7 +1503,7 @@ bool showUmaRelaxationOptionsDialog(QWidget* parent, bool japanese, UmaRelaxatio
     }
 
     options->modelPath = modelPathEdit->text().trimmed();
-    options->pythonCommand = pythonCommandEdit->text().trimmed().isEmpty() ? QStringLiteral("python") : pythonCommandEdit->text().trimmed();
+    options->pythonCommand = pythonCommandEdit->text().trimmed().isEmpty() ? QStringLiteral("auto") : pythonCommandEdit->text().trimmed();
     options->taskName = taskCombo->currentText().trimmed().isEmpty() ? QStringLiteral("oc20") : taskCombo->currentText().trimmed();
     options->device = deviceCombo->currentText().trimmed().isEmpty() ? QStringLiteral("cuda") : deviceCombo->currentText().trimmed();
     options->fmax = fmaxSpin->value();
@@ -3217,6 +3267,8 @@ QString MainWindow::uiText(const QString& key) const {
         if (key == "apply") return QStringLiteral("配置する");
         if (key == "clear") return QStringLiteral("選択解除");
         if (key == "delete_selected") return QStringLiteral("選択原子を削除");
+        if (key == "replace_selected_element") return QStringLiteral("選択原子を元素置換");
+        if (key == "place_relative") return QStringLiteral("相対配置...");
         if (key == "fix_selected_atoms") return QStringLiteral("選択原子を固定");
         if (key == "unfix_selected_atoms") return QStringLiteral("選択原子の固定解除");
         if (key == "undo") return QStringLiteral("元に戻す");
@@ -3314,6 +3366,8 @@ QString MainWindow::uiText(const QString& key) const {
         if (key == "apply") return QStringLiteral("Apply");
         if (key == "clear") return QStringLiteral("Clear selection");
         if (key == "delete_selected") return QStringLiteral("Delete selected atoms");
+        if (key == "replace_selected_element") return QStringLiteral("Replace selected element");
+        if (key == "place_relative") return QStringLiteral("Relative placement...");
         if (key == "fix_selected_atoms") return QStringLiteral("Fix selected atoms");
         if (key == "unfix_selected_atoms") return QStringLiteral("Unfix selected atoms");
         if (key == "undo") return QStringLiteral("Undo");
@@ -3463,10 +3517,18 @@ void MainWindow::buildUi() {
     auto* dftInputButton = new QPushButton(m_japanese ? QStringLiteral("DFT入力生成...") : QStringLiteral("DFT input..."), fileGroup);
     dftInputButton->setToolTip(m_japanese ? QStringLiteral("現在開いている構造からSIESTA/QE入力を生成します。") : QStringLiteral("Generate SIESTA/QE inputs from the current structure."));
     connect(dftInputButton, &QPushButton::clicked, this, &MainWindow::showDftInputGenerator);
+    auto* dftBatchButton = new QPushButton(m_japanese ? QStringLiteral("DFT入力バッチ生成...") : QStringLiteral("DFT input batch..."), fileGroup);
+    dftBatchButton->setToolTip(m_japanese ? QStringLiteral("複数の構造ファイルへ同じDFTパラメータを適用して入力ファイルを生成します。") : QStringLiteral("Generate DFT inputs for multiple structures using the same parameters."));
+    connect(dftBatchButton, &QPushButton::clicked, this, &MainWindow::showDftInputBatchGenerator);
+    auto* siestaResultsButton = new QPushButton(m_japanese ? QStringLiteral("SIESTA結果解析...") : QStringLiteral("SIESTA results..."), fileGroup);
+    siestaResultsButton->setToolTip(m_japanese ? QStringLiteral("複数のSIESTA出力を解析し、収束状況を比較・監視します。") : QStringLiteral("Analyze, compare, and monitor multiple SIESTA outputs."));
+    connect(siestaResultsButton, &QPushButton::clicked, this, &MainWindow::showSiestaResultsAnalyzer);
     fileLayout->addWidget(m_fileLabel);
     fileLayout->addWidget(openButton);
     fileLayout->addWidget(saveButton);
     fileLayout->addWidget(dftInputButton);
+    fileLayout->addWidget(dftBatchButton);
+    fileLayout->addWidget(siestaResultsButton);
     rightLayout->addWidget(fileGroup);
     makeCollapsibleGroup(fileGroup, QStringLiteral("file"), false);
 
@@ -3529,6 +3591,10 @@ void MainWindow::buildUi() {
     m_clearSelectionButton->setToolTip(m_japanese ? QStringLiteral("選択をすべて解除します。Escキーでも実行できます。") : QStringLiteral("Clear all selected atoms. The Esc key does the same."));
     m_deleteSelectedButton = new QPushButton(uiText(QStringLiteral("delete_selected")), presetGroup);
     m_deleteSelectedButton->setToolTip(m_japanese ? QStringLiteral("黄色で選択中の原子を一括削除します。Deleteキーでも実行できます。") : QStringLiteral("Delete all atoms highlighted in yellow. The Delete key does the same."));
+    m_replaceSelectedElementButton = new QPushButton(uiText(QStringLiteral("replace_selected_element")), presetGroup);
+    m_replaceSelectedElementButton->setToolTip(m_japanese ? QStringLiteral("選択中の原子を、現在の生成元素に置き換えます。座標と固定状態は維持します。") : QStringLiteral("Replace selected atoms with the current placement element while keeping coordinates and fixed flags."));
+    m_placeRelativeButton = new QPushButton(uiText(QStringLiteral("place_relative")), presetGroup);
+    m_placeRelativeButton->setToolTip(m_japanese ? QStringLiteral("選択原子を起点に、元素・距離・方向を指定して新しい原子を追加します。") : QStringLiteral("Add atom(s) from selected atom(s) with a specified element, distance, and direction."));
     m_fixSelectedButton = new QPushButton(uiText(QStringLiteral("fix_selected_atoms")), presetGroup);
     m_fixSelectedButton->setToolTip(m_japanese ? QStringLiteral("選択中の原子を固定として保存します。POSCAR/VASPでは行末に 1 1 1 を追加します。") : QStringLiteral("Mark selected atoms as fixed. POSCAR/VASP export appends 1 1 1 to those coordinate rows."));
     m_unfixSelectedButton = new QPushButton(uiText(QStringLiteral("unfix_selected_atoms")), presetGroup);
@@ -3577,6 +3643,8 @@ void MainWindow::buildUi() {
     connect(m_openPresetButton, &QPushButton::clicked, this, &MainWindow::openPresetFile);
     connect(m_clearSelectionButton, &QPushButton::clicked, this, &MainWindow::clearSelection);
     connect(m_deleteSelectedButton, &QPushButton::clicked, this, &MainWindow::deleteSelectedAtoms);
+    connect(m_replaceSelectedElementButton, &QPushButton::clicked, this, &MainWindow::replaceSelectedAtomsElement);
+    connect(m_placeRelativeButton, &QPushButton::clicked, this, &MainWindow::placeRelativeToSelectedAtoms);
     connect(m_fixSelectedButton, &QPushButton::clicked, this, &MainWindow::fixSelectedAtoms);
     connect(m_unfixSelectedButton, &QPushButton::clicked, this, &MainWindow::unfixSelectedAtoms);
     connect(exportLegendButton, &QPushButton::clicked, this, &MainWindow::exportElementLegendImage);
@@ -3615,6 +3683,10 @@ void MainWindow::buildUi() {
     presetUtilityRow->addWidget(m_clearSelectionButton);
     presetUtilityRow->addWidget(m_deleteSelectedButton);
     presetLayout->addLayout(presetUtilityRow);
+    auto* selectedAtomEditRow = new QHBoxLayout();
+    selectedAtomEditRow->addWidget(m_replaceSelectedElementButton);
+    selectedAtomEditRow->addWidget(m_placeRelativeButton);
+    presetLayout->addLayout(selectedAtomEditRow);
     auto* fixedAtomRow = new QHBoxLayout();
     fixedAtomRow->addWidget(m_fixSelectedButton);
     fixedAtomRow->addWidget(m_unfixSelectedButton);
@@ -3777,6 +3849,10 @@ void MainWindow::buildUi() {
     surfaceLayout->addWidget(removeVacuumButton);
     surfaceLayout->addWidget(axisTiltButton);
     surfaceLayout->addWidget(umaOptimizeButton);
+    auto* umaBatchButton = new QPushButton(m_japanese ? QStringLiteral("UMAバッチ処理...") : QStringLiteral("UMA batch..."), surfaceGroup);
+    umaBatchButton->setToolTip(m_japanese ? QStringLiteral("複数の構造ファイルを同じ設定で順番に最適化します。") : QStringLiteral("Optimize multiple structure files sequentially with the same settings."));
+    connect(umaBatchButton, &QPushButton::clicked, this, &MainWindow::optimizeFilesWithUmaBatch);
+    surfaceLayout->addWidget(umaBatchButton);
     rightLayout->addWidget(surfaceGroup);
     makeCollapsibleGroup(surfaceGroup, QStringLiteral("surface"), true);
 
@@ -3980,6 +4056,22 @@ void MainWindow::buildUi() {
     m_dftInputAction->setToolTip(m_japanese ? QStringLiteral("現在の構造からSIESTA/QE入力ファイルを生成します。") : QStringLiteral("Generate SIESTA/QE input files from the current structure."));
     connect(m_dftInputAction, &QAction::triggered, this, &MainWindow::showDftInputGenerator);
     toolbar->addAction(m_dftInputAction);
+    m_dftInputBatchAction = new QAction(m_japanese ? QStringLiteral("DFT入力バッチ") : QStringLiteral("DFT input batch"), this);
+    m_dftInputBatchAction->setShortcut(QKeySequence("Ctrl+Shift+Alt+D"));
+    m_dftInputBatchAction->setToolTip(m_japanese ? QStringLiteral("選択した複数構造へ同じパラメータでDFT入力を生成します。") : QStringLiteral("Generate DFT inputs for selected structures with shared parameters."));
+    connect(m_dftInputBatchAction, &QAction::triggered, this, &MainWindow::showDftInputBatchGenerator);
+    m_siestaResultsAction = new QAction(m_japanese ? QStringLiteral("SIESTA結果解析") : QStringLiteral("SIESTA results"), this);
+    m_siestaResultsAction->setShortcut(QKeySequence("Ctrl+Alt+S"));
+    m_siestaResultsAction->setToolTip(m_japanese ? QStringLiteral("SIESTA出力の収束状況、エネルギー、力、SCF履歴を解析します。") : QStringLiteral("Analyze convergence, energy, forces, and SCF history in SIESTA outputs."));
+    connect(m_siestaResultsAction, &QAction::triggered, this, &MainWindow::showSiestaResultsAnalyzer);
+    toolbar->addAction(m_siestaResultsAction);
+    m_siestaConvertAction = new QAction(
+        m_japanese ? QStringLiteral("SIESTA最終構造→VASP") : QStringLiteral("SIESTA final → VASP"), this);
+    m_siestaConvertAction->setShortcut(QKeySequence("Ctrl+Shift+Alt+S"));
+    m_siestaConvertAction->setToolTip(m_japanese
+        ? QStringLiteral("SIESTAのSTRUCT_OUT、XV、outcoor最終構造をVASPへ変換し、保存後に自動で開きます。")
+        : QStringLiteral("Convert a SIESTA STRUCT_OUT, XV, or final outcoor geometry to VASP and open it after saving."));
+    connect(m_siestaConvertAction, &QAction::triggered, this, &MainWindow::convertSiestaFinalToVasp);
     m_exportLegendAction = new QAction(uiText(QStringLiteral("export_legend")), this);
     m_exportLegendAction->setShortcut(QKeySequence("Ctrl+Alt+L"));
     m_exportLegendAction->setToolTip(uiText(QStringLiteral("export_legend_tip")));
@@ -4038,6 +4130,10 @@ void MainWindow::buildUi() {
     m_umaOptimizeAction->setShortcut(QKeySequence("Ctrl+Alt+U"));
     m_umaOptimizeAction->setToolTip(uiText(QStringLiteral("uma_optimize_tip")));
     connect(m_umaOptimizeAction, &QAction::triggered, this, &MainWindow::optimizeStructureWithUma);
+    m_umaBatchAction = new QAction(m_japanese ? QStringLiteral("UMAバッチ処理...") : QStringLiteral("UMA batch..."), this);
+    m_umaBatchAction->setShortcut(QKeySequence("Ctrl+Shift+Alt+U"));
+    m_umaBatchAction->setToolTip(m_japanese ? QStringLiteral("選択した複数ファイルを同じUMA設定で最適化します。") : QStringLiteral("Run the same UMA relaxation for multiple selected files."));
+    connect(m_umaBatchAction, &QAction::triggered, this, &MainWindow::optimizeFilesWithUmaBatch);
     m_showCellAction = toolbar->addAction(uiText(QStringLiteral("cell"))); m_showCellAction->setCheckable(true); m_showCellAction->setChecked(m_showCellCheck != nullptr ? m_showCellCheck->isChecked() : true);
     m_showCellAction->setToolTip("Show or hide the unit-cell frame.");
     connect(m_showCellAction, &QAction::toggled, m_showCellCheck, &QCheckBox::setChecked);
@@ -4085,6 +4181,9 @@ void MainWindow::buildUi() {
     fileMenu->addSeparator();
     fileMenu->addAction(m_saveAction);
     fileMenu->addAction(m_dftInputAction);
+    fileMenu->addAction(m_dftInputBatchAction);
+    fileMenu->addAction(m_siestaResultsAction);
+    fileMenu->addAction(m_siestaConvertAction);
     fileMenu->addSeparator();
     fileMenu->addAction(m_exportLegendAction);
 
@@ -4106,6 +4205,10 @@ void MainWindow::buildUi() {
             deleteSelectedAtoms();
         }
     });
+    auto* replaceSelectedElementAction = editMenu->addAction(uiText(QStringLiteral("replace_selected_element")));
+    connect(replaceSelectedElementAction, &QAction::triggered, this, &MainWindow::replaceSelectedAtomsElement);
+    auto* placeRelativeAction = editMenu->addAction(uiText(QStringLiteral("place_relative")));
+    connect(placeRelativeAction, &QAction::triggered, this, &MainWindow::placeRelativeToSelectedAtoms);
     editMenu->addSeparator();
     auto* fixSelectedAction = editMenu->addAction(uiText(QStringLiteral("fix_selected_atoms")));
     connect(fixSelectedAction, &QAction::triggered, this, &MainWindow::fixSelectedAtoms);
@@ -4119,6 +4222,7 @@ void MainWindow::buildUi() {
     structureMenu->addAction(m_axisTiltAction);
     structureMenu->addAction(m_terminateAction);
     structureMenu->addAction(m_umaOptimizeAction);
+    structureMenu->addAction(m_umaBatchAction);
     structureMenu->addSeparator();
     auto* structureCheckAction = structureMenu->addAction(m_japanese ? QStringLiteral("構造チェック") : QStringLiteral("Structure check"));
     connect(structureCheckAction, &QAction::triggered, this, &MainWindow::showStructureCheckReport);
@@ -4130,6 +4234,10 @@ void MainWindow::buildUi() {
     connect(chooseElementAction, &QAction::triggered, this, &MainWindow::choosePlacementElement);
     auto* applyPlacementAction = placementMenu->addAction(uiText(QStringLiteral("apply")));
     connect(applyPlacementAction, &QAction::triggered, this, &MainWindow::applySelectedPreset);
+    auto* replacePlacementElementAction = placementMenu->addAction(uiText(QStringLiteral("replace_selected_element")));
+    connect(replacePlacementElementAction, &QAction::triggered, this, &MainWindow::replaceSelectedAtomsElement);
+    auto* relativePlacementAction = placementMenu->addAction(uiText(QStringLiteral("place_relative")));
+    connect(relativePlacementAction, &QAction::triggered, this, &MainWindow::placeRelativeToSelectedAtoms);
     placementMenu->addSeparator();
     auto* reloadPresetAction = placementMenu->addAction(uiText(QStringLiteral("reload")));
     connect(reloadPresetAction, &QAction::triggered, this, &MainWindow::reloadPresetRegistry);
@@ -4620,13 +4728,38 @@ void MainWindow::applyStructureState(const StructureData& structure) {
 void MainWindow::dragEnterEvent(QDragEnterEvent* event) { if (event->mimeData()->hasUrls()) event->acceptProposedAction(); }
 
 void MainWindow::dropEvent(QDropEvent* event) {
+    QStringList localPaths;
     for (const auto& url : event->mimeData()->urls()) {
-        if (url.isLocalFile()) {
-            loadFromPathAsync(url.toLocalFile());
-            event->acceptProposedAction();
-            return;
+        if (url.isLocalFile() && QFileInfo(url.toLocalFile()).isFile()) {
+            localPaths << url.toLocalFile();
         }
     }
+    if (localPaths.isEmpty()) return;
+
+    event->acceptProposedAction();
+    if (localPaths.size() == 1) {
+        loadFromPathAsync(localPaths.front());
+        return;
+    }
+
+    int loadedCount = 0;
+    for (int index = 0; index < localPaths.size(); ++index) {
+        statusBar()->showMessage(
+            m_japanese
+                ? QStringLiteral("ドロップされたファイルを読み込み中 (%1/%2): %3")
+                      .arg(index + 1).arg(localPaths.size()).arg(QFileInfo(localPaths.at(index)).fileName())
+                : QStringLiteral("Loading dropped files (%1/%2): %3")
+                      .arg(index + 1).arg(localPaths.size()).arg(QFileInfo(localPaths.at(index)).fileName()));
+        QApplication::processEvents(QEventLoop::ExcludeUserInputEvents);
+        if (loadFromPath(localPaths.at(index))) ++loadedCount;
+    }
+    statusBar()->showMessage(
+        m_japanese
+            ? QStringLiteral("ドロップされた %1 / %2 ファイルを読み込みました。各ファイルはタブで開かれています。")
+                  .arg(loadedCount).arg(localPaths.size())
+            : QStringLiteral("Loaded %1 of %2 dropped files in separate tabs.")
+                  .arg(loadedCount).arg(localPaths.size()),
+        5000);
 }
 
 void MainWindow::openStructure() {
@@ -4643,6 +4776,46 @@ void MainWindow::showDftInputGenerator() {
         return;
     }
     DftInputGeneratorDialog dialog(m_structure, this);
+    dialog.exec();
+}
+
+void MainWindow::showSiestaResultsAnalyzer() {
+    SiestaResultsDialog dialog(this);
+    dialog.exec();
+}
+
+void MainWindow::convertSiestaFinalToVasp() {
+    SiestaFinalConversionDialog dialog(defaultOpenDirectory(), m_japanese, this);
+    if (dialog.exec() != QDialog::Accepted || dialog.outputPath().isEmpty()) return;
+    const QString outputPath = dialog.outputPath();
+    if (!loadFromPath(outputPath)) return;
+    statusBar()->showMessage(m_japanese
+        ? QStringLiteral("VASPへ変換して開きました: %1").arg(outputPath)
+        : QStringLiteral("Converted to VASP and opened: %1").arg(outputPath), 6000);
+}
+
+void MainWindow::showDftInputBatchGenerator() {
+    const QStringList paths = QFileDialog::getOpenFileNames(
+        this,
+        m_japanese ? QStringLiteral("DFT入力をバッチ生成する構造ファイルを選択") : QStringLiteral("Select structures for DFT input batch"),
+        defaultOpenDirectory(),
+        QStringLiteral("Structure files (*.aseproj *.json *.cif *.xyz *.extxyz *.vasp *.poscar *.contcar POSCAR CONTCAR *.pdb *.xsf *.txt *.out);;All files (*.*)"));
+    if (paths.isEmpty()) return;
+
+    QString loadError;
+    const auto firstStructure = m_loader->load(paths.front(), &loadError);
+    if (!firstStructure.has_value()) {
+        QMessageBox::warning(
+            this,
+            m_japanese ? QStringLiteral("DFT入力バッチ") : QStringLiteral("DFT input batch"),
+            m_japanese
+                ? QStringLiteral("最初の構造ファイルを読み込めませんでした:\n%1").arg(loadError)
+                : QStringLiteral("Failed to load the first structure:\n%1").arg(loadError));
+        return;
+    }
+
+    DftInputGeneratorDialog dialog(*firstStructure, this);
+    dialog.setBatchStructurePaths(paths);
     dialog.exec();
 }
 
@@ -4774,10 +4947,10 @@ void MainWindow::showAppSettingsDialog() {
     });
     umaForm->addRow(m_japanese ? QStringLiteral("Model checkpoint") : QStringLiteral("Model checkpoint"), umaModelRow);
 
-    auto* umaPythonCommandEdit = new QLineEdit(appStringSetting({QStringLiteral("uma"), QStringLiteral("pythonCommand")}, QStringLiteral("python")), umaPage);
+    auto* umaPythonCommandEdit = new QLineEdit(appStringSetting({QStringLiteral("uma"), QStringLiteral("pythonCommand")}, QStringLiteral("auto")), umaPage);
     umaPythonCommandEdit->setToolTip(m_japanese
-        ? QStringLiteral("例: python / conda run -n uma_proj python / C:\\path\\to\\python.exe")
-        : QStringLiteral("Examples: python / conda run -n uma_proj python / C:\\path\\to\\python.exe"));
+        ? QStringLiteral("auto（推奨）: fairchem を含む uma_proj 環境を自動検出。例: C:\\path\\to\\python.exe")
+        : QStringLiteral("auto (recommended) detects uma_proj/fairchem. Example: C:\\path\\to\\python.exe"));
     umaForm->addRow(m_japanese ? QStringLiteral("Python command") : QStringLiteral("Python command"), umaPythonCommandEdit);
 
     auto* umaTaskCombo = new QComboBox(umaPage);
@@ -4837,7 +5010,7 @@ void MainWindow::showAppSettingsDialog() {
         }
         const QJsonObject umaDefaults = defaults.value(QStringLiteral("uma")).toObject();
         umaModelPathEdit->setText(umaDefaults.value(QStringLiteral("modelPath")).toString());
-        umaPythonCommandEdit->setText(umaDefaults.value(QStringLiteral("pythonCommand")).toString(QStringLiteral("python")));
+        umaPythonCommandEdit->setText(umaDefaults.value(QStringLiteral("pythonCommand")).toString(QStringLiteral("auto")));
         umaTaskCombo->setCurrentText(umaDefaults.value(QStringLiteral("taskName")).toString(QStringLiteral("oc20")));
         umaDeviceCombo->setCurrentText(umaDefaults.value(QStringLiteral("device")).toString(QStringLiteral("cuda")));
         umaFmaxSpin->setValue(umaDefaults.value(QStringLiteral("fmax")).toDouble(0.05));
@@ -4878,7 +5051,7 @@ void MainWindow::showAppSettingsDialog() {
         }
     }
     setAppSettingValue({QStringLiteral("uma"), QStringLiteral("modelPath")}, umaModelPathEdit->text().trimmed());
-    setAppSettingValue({QStringLiteral("uma"), QStringLiteral("pythonCommand")}, umaPythonCommandEdit->text().trimmed().isEmpty() ? QStringLiteral("python") : umaPythonCommandEdit->text().trimmed());
+    setAppSettingValue({QStringLiteral("uma"), QStringLiteral("pythonCommand")}, umaPythonCommandEdit->text().trimmed().isEmpty() ? QStringLiteral("auto") : umaPythonCommandEdit->text().trimmed());
     setAppSettingValue({QStringLiteral("uma"), QStringLiteral("taskName")}, umaTaskCombo->currentText().trimmed().isEmpty() ? QStringLiteral("oc20") : umaTaskCombo->currentText().trimmed());
     setAppSettingValue({QStringLiteral("uma"), QStringLiteral("device")}, umaDeviceCombo->currentText().trimmed().isEmpty() ? QStringLiteral("cuda") : umaDeviceCombo->currentText().trimmed());
     setAppSettingValue({QStringLiteral("uma"), QStringLiteral("fmax")}, umaFmaxSpin->value());
@@ -4887,6 +5060,67 @@ void MainWindow::showAppSettingsDialog() {
     statusBar()->showMessage(
         m_japanese ? QStringLiteral("アプリ設定を保存しました。") : QStringLiteral("App settings saved."),
         3500);
+}
+
+QString MainWindow::beginUmaLog(const QString& title) {
+    if (m_umaLogDialog == nullptr) {
+        m_umaLogDialog = new QDialog(this, Qt::Window);
+        m_umaLogDialog->setWindowTitle(QStringLiteral("UMA live log"));
+        auto* layout = new QVBoxLayout(m_umaLogDialog);
+        m_umaLogStatusLabel = new QLabel(m_umaLogDialog);
+        m_umaLogStatusLabel->setWordWrap(true);
+        layout->addWidget(m_umaLogStatusLabel);
+        m_umaLogEdit = new QPlainTextEdit(m_umaLogDialog);
+        m_umaLogEdit->setReadOnly(true);
+        m_umaLogEdit->setLineWrapMode(QPlainTextEdit::NoWrap);
+        QFont logFont = QFont(QStringLiteral("Consolas"));
+        logFont.setStyleHint(QFont::Monospace);
+        m_umaLogEdit->setFont(logFont);
+        layout->addWidget(m_umaLogEdit, 1);
+        auto* closeButton = new QPushButton(m_japanese ? QStringLiteral("閉じる") : QStringLiteral("Close"), m_umaLogDialog);
+        connect(closeButton, &QPushButton::clicked, m_umaLogDialog, &QDialog::hide);
+        layout->addWidget(closeButton, 0, Qt::AlignRight);
+        m_umaLogDialog->resize(920, 520);
+    }
+    m_umaLogDialog->setWindowTitle(QStringLiteral("UMA live log - %1").arg(title));
+    m_umaLogStatusLabel->setText(m_japanese ? QStringLiteral("実行中: %1").arg(title) : QStringLiteral("Running: %1").arg(title));
+    m_umaLogEdit->clear();
+
+    QString logRoot = QStandardPaths::writableLocation(QStandardPaths::AppLocalDataLocation);
+    if (logRoot.trimmed().isEmpty()) {
+        logRoot = QDir::home().filePath(QStringLiteral(".aseapp"));
+    }
+    const QString logDir = QDir(logRoot).filePath(QStringLiteral("uma_logs"));
+    QDir().mkpath(logDir);
+    const QString timestamp = QDateTime::currentDateTime().toString(QStringLiteral("yyyyMMdd_HHmmss_zzz"));
+    const QString logPath = QDir(logDir).filePath(QStringLiteral("uma_%1.log").arg(timestamp));
+    appendUmaLog(QStringLiteral("[ASEapp] Log: %1\n").arg(QDir::toNativeSeparators(logPath)));
+    m_umaLogDialog->show();
+    m_umaLogDialog->raise();
+    m_umaLogDialog->activateWindow();
+    return logPath;
+}
+
+void MainWindow::appendUmaLog(const QString& text) {
+    if (m_umaLogEdit == nullptr || text.isEmpty()) {
+        return;
+    }
+    QTextCursor cursor = m_umaLogEdit->textCursor();
+    cursor.movePosition(QTextCursor::End);
+    cursor.insertText(text);
+    m_umaLogEdit->setTextCursor(cursor);
+    m_umaLogEdit->ensureCursorVisible();
+}
+
+void MainWindow::finishUmaLog(const QString& message) {
+    appendUmaLog(QStringLiteral("\n[ASEapp] %1\n").arg(message));
+    if (m_umaLogStatusLabel != nullptr) {
+        m_umaLogStatusLabel->setText(message);
+    }
+    if (m_umaLogDialog != nullptr) {
+        m_umaLogDialog->show();
+        m_umaLogDialog->raise();
+    }
 }
 
 void MainWindow::optimizeStructureWithUma() {
@@ -4938,8 +5172,8 @@ void MainWindow::optimizeStructureWithUma() {
         return;
     }
 
-    const QString pythonCommand = options.pythonCommand.trimmed().isEmpty() ? QStringLiteral("python") : options.pythonCommand.trimmed();
-    QStringList commandParts = QProcess::splitCommand(pythonCommand.isEmpty() ? QStringLiteral("python") : pythonCommand);
+    const QString pythonCommand = resolvedUmaPythonCommand(options.pythonCommand);
+    QStringList commandParts = QProcess::splitCommand(pythonCommand);
     if (commandParts.isEmpty()) {
         QMessageBox::warning(
             this,
@@ -4996,11 +5230,25 @@ void MainWindow::optimizeStructureWithUma() {
         arguments << QStringLiteral("--fix-selective");
     }
 
+    const QString persistentLogPath = beginUmaLog(QFileInfo(m_structure.sourcePath).fileName().isEmpty()
+        ? QStringLiteral("current structure")
+        : QFileInfo(m_structure.sourcePath).fileName());
+    QFile persistentLog(persistentLogPath);
+    persistentLog.open(QIODevice::WriteOnly | QIODevice::Truncate | QIODevice::Text);
+    const QString commandLine = QStringLiteral("[ASEapp] Command:\n%1 %2\n\n").arg(program, arguments.join(QLatin1Char(' ')));
+    appendUmaLog(commandLine);
+    persistentLog.write(commandLine.toUtf8());
+    persistentLog.flush();
+
     QProcess process;
     process.setProcessChannelMode(QProcess::MergedChannels);
     QString processOutput;
     connect(&process, &QProcess::readyReadStandardOutput, this, [&]() {
-        processOutput += QString::fromUtf8(process.readAllStandardOutput());
+        const QString chunk = QString::fromUtf8(process.readAllStandardOutput());
+        processOutput += chunk;
+        appendUmaLog(chunk);
+        persistentLog.write(chunk.toUtf8());
+        persistentLog.flush();
     });
 
     QProgressDialog progress(
@@ -5019,6 +5267,7 @@ void MainWindow::optimizeStructureWithUma() {
     process.start(program, arguments);
     if (!process.waitForStarted(10000)) {
         progress.close();
+        finishUmaLog(m_japanese ? QStringLiteral("UMAプロセスを起動できませんでした。") : QStringLiteral("Failed to start the UMA process."));
         QMessageBox::critical(
             this,
             m_japanese ? QStringLiteral("Failed to start UMA") : QStringLiteral("Failed to start UMA"),
@@ -5045,16 +5294,24 @@ void MainWindow::optimizeStructureWithUma() {
                 + tail);
         }
     }
-    processOutput += QString::fromUtf8(process.readAllStandardOutput());
+    const QString residualOutput = QString::fromUtf8(process.readAllStandardOutput());
+    if (!residualOutput.isEmpty()) {
+        processOutput += residualOutput;
+        appendUmaLog(residualOutput);
+        persistentLog.write(residualOutput.toUtf8());
+        persistentLog.flush();
+    }
     progress.close();
 
     if (canceled) {
+        finishUmaLog(m_japanese ? QStringLiteral("UMA処理をキャンセルしました。") : QStringLiteral("UMA run canceled."));
         statusBar()->showMessage(m_japanese ? QStringLiteral("Canceled UMA relaxation.") : QStringLiteral("Canceled UMA relaxation."), 3500);
         return;
     }
 
     const QString summaryText = readUtf8TextFile(summaryPath);
     if (process.exitStatus() != QProcess::NormalExit || process.exitCode() != 0 || !QFileInfo::exists(outputPath)) {
+        finishUmaLog(m_japanese ? QStringLiteral("UMA処理が失敗しました。ログを確認してください。") : QStringLiteral("UMA run failed. See the log."));
         tempDir.setAutoRemove(false);
         QMessageBox box(QMessageBox::Critical,
                         m_japanese ? QStringLiteral("UMA relaxation failed") : QStringLiteral("UMA relaxation failed"),
@@ -5096,7 +5353,40 @@ void MainWindow::optimizeStructureWithUma() {
         }
     }
 
+    QString umaSavedPath;
+    const QFileInfo sourceInfo(m_structure.sourcePath);
+    if (sourceInfo.exists() && sourceInfo.isFile()) {
+        umaSavedPath = QDir(sourceInfo.absolutePath()).filePath(sourceInfo.completeBaseName() + QStringLiteral("_UMA.vasp"));
+        if (QFileInfo::exists(umaSavedPath)) {
+            const auto overwrite = QMessageBox::question(
+                this,
+                m_japanese ? QStringLiteral("UMA出力の上書き確認") : QStringLiteral("Overwrite UMA output"),
+                m_japanese
+                    ? QStringLiteral("既存ファイルを上書きしますか？\n%1").arg(QDir::toNativeSeparators(umaSavedPath))
+                    : QStringLiteral("Overwrite the existing file?\n%1").arg(QDir::toNativeSeparators(umaSavedPath)),
+                QMessageBox::Yes | QMessageBox::No,
+                QMessageBox::No);
+            if (overwrite != QMessageBox::Yes) umaSavedPath.clear();
+        }
+        if (!umaSavedPath.isEmpty()) {
+            QString saveError;
+            if (!writePoscarFile(updated, umaSavedPath, CoordinateOutputMode::Direct, &saveError)) {
+                QMessageBox::critical(
+                    this,
+                    m_japanese ? QStringLiteral("UMA結果の保存失敗") : QStringLiteral("Failed to save UMA result"),
+                    saveError);
+                umaSavedPath.clear();
+            }
+        }
+    }
+
     replaceStructureFromEdit(updated, QStringLiteral("uma_optimization"));
+    if (!umaSavedPath.isEmpty()) {
+        m_structure.sourcePath = umaSavedPath;
+        m_structure.dirty = false;
+        applyStructureState(m_structure);
+    }
+    finishUmaLog(m_japanese ? QStringLiteral("UMA構造最適化が完了しました。") : QStringLiteral("UMA relaxation finished."));
 
     QString summaryLine;
     const QJsonDocument summaryDoc = QJsonDocument::fromJson(summaryText.toUtf8());
@@ -5116,15 +5406,185 @@ void MainWindow::optimizeStructureWithUma() {
         this,
         m_japanese ? QStringLiteral("UMA relaxation finished") : QStringLiteral("UMA relaxation finished"),
         m_japanese
-            ? QStringLiteral("最適化結果を描画しました。\n%1").arg(summaryLine)
-            : QStringLiteral("The optimized structure has been loaded and rendered.\n%1").arg(summaryLine));
+            ? QStringLiteral("最適化結果を描画しました。\n%1\n保存先: %2").arg(summaryLine, umaSavedPath.isEmpty() ? QStringLiteral("未保存") : QDir::toNativeSeparators(umaSavedPath))
+            : QStringLiteral("The optimized structure has been loaded and rendered.\n%1\nSaved to: %2").arg(summaryLine, umaSavedPath.isEmpty() ? QStringLiteral("not saved") : QDir::toNativeSeparators(umaSavedPath)));
+}
+
+void MainWindow::optimizeFilesWithUmaBatch() {
+    const QStringList inputPaths = QFileDialog::getOpenFileNames(
+        this,
+        m_japanese ? QStringLiteral("UMAバッチ処理する構造ファイルを選択") : QStringLiteral("Select structures for UMA batch"),
+        defaultOpenDirectory(),
+        QStringLiteral("Structure files (*.cif *.xyz *.extxyz *.vasp *.poscar POSCAR CONTCAR *.pdb *.xsf *.traj);;All files (*.*)"));
+    if (inputPaths.isEmpty()) return;
+
+    QStringList existingOutputs;
+    for (const QString& inputPath : inputPaths) {
+        const QFileInfo inputInfo(inputPath);
+        const QString outputPath = QDir(inputInfo.absolutePath()).filePath(inputInfo.completeBaseName() + QStringLiteral("_UMA.vasp"));
+        if (QFileInfo::exists(outputPath)) existingOutputs << QDir::toNativeSeparators(outputPath);
+    }
+    if (!existingOutputs.isEmpty()) {
+        const auto overwrite = QMessageBox::question(
+            this,
+            m_japanese ? QStringLiteral("UMA出力の上書き確認") : QStringLiteral("Overwrite UMA outputs"),
+            (m_japanese
+                ? QStringLiteral("次の既存ファイルを上書きします。続行しますか？\n")
+                : QStringLiteral("The following output files already exist and will be overwritten. Continue?\n"))
+                + existingOutputs.join(QLatin1Char('\n')),
+            QMessageBox::Yes | QMessageBox::No,
+            QMessageBox::No);
+        if (overwrite != QMessageBox::Yes) return;
+    }
+
+    UmaRelaxationOptions options = loadUmaRelaxationOptions();
+    if (!showUmaRelaxationOptionsDialog(this, m_japanese, &options)) return;
+    saveUmaRelaxationOptions(options);
+
+    QFileInfo modelInfo(options.modelPath);
+    if (modelInfo.isRelative()) modelInfo = QFileInfo(QDir(QCoreApplication::applicationDirPath()).absoluteFilePath(options.modelPath));
+    if (!modelInfo.exists() || !modelInfo.isFile()) {
+        QMessageBox::warning(this, QStringLiteral("UMA checkpoint not found"),
+            m_japanese ? QStringLiteral("指定された重みファイルが見つかりません:\n%1").arg(modelInfo.absoluteFilePath())
+                       : QStringLiteral("The configured checkpoint was not found:\n%1").arg(modelInfo.absoluteFilePath()));
+        return;
+    }
+    const QString workerPath = umaWorkerScriptPath();
+    if (!QFileInfo::exists(workerPath)) {
+        QMessageBox::critical(this, QStringLiteral("UMA"),
+            m_japanese ? QStringLiteral("UMA実行用Pythonスクリプトが見つかりません:\n%1").arg(workerPath)
+                       : QStringLiteral("The UMA worker script was not found:\n%1").arg(workerPath));
+        return;
+    }
+    QStringList commandParts = QProcess::splitCommand(resolvedUmaPythonCommand(options.pythonCommand));
+    if (commandParts.isEmpty()) {
+        QMessageBox::warning(this, QStringLiteral("UMA"), m_japanese ? QStringLiteral("Pythonコマンドが空です。") : QStringLiteral("The Python command is empty."));
+        return;
+    }
+    const QString program = commandParts.takeFirst();
+    const QString taskName = options.taskName.trimmed().isEmpty() ? QStringLiteral("oc20") : options.taskName.trimmed();
+    const QString device = options.device.trimmed().isEmpty() ? QStringLiteral("cuda") : options.device.trimmed();
+
+    const QString persistentLogPath = beginUmaLog(m_japanese ? QStringLiteral("バッチ %1ファイル").arg(inputPaths.size()) : QStringLiteral("batch: %1 files").arg(inputPaths.size()));
+    QFile persistentLog(persistentLogPath);
+    persistentLog.open(QIODevice::WriteOnly | QIODevice::Truncate | QIODevice::Text);
+    const QString header = QStringLiteral("[ASEapp] UMA batch\n[ASEapp] Inputs: %1\n[ASEapp] Output: <original directory>/<original name>_UMA.vasp\n\n")
+        .arg(inputPaths.size());
+    appendUmaLog(header);
+    persistentLog.write(header.toUtf8());
+
+    QProgressDialog progress(
+        m_japanese ? QStringLiteral("UMAバッチ処理を開始しています...") : QStringLiteral("Starting UMA batch..."),
+        m_japanese ? QStringLiteral("キャンセル") : QStringLiteral("Cancel"), 0, inputPaths.size(), this);
+    progress.setWindowTitle(m_japanese ? QStringLiteral("UMAバッチ処理") : QStringLiteral("UMA batch"));
+    progress.setWindowModality(Qt::WindowModal);
+    progress.setMinimumDuration(0);
+    progress.show();
+
+    QStringList succeeded;
+    QStringList failed;
+    bool canceled = false;
+    for (int fileIndex = 0; fileIndex < inputPaths.size(); ++fileIndex) {
+        if (progress.wasCanceled()) { canceled = true; break; }
+        const QString inputPath = inputPaths.at(fileIndex);
+        const QFileInfo inputInfo(inputPath);
+        QString baseName = inputInfo.completeBaseName().trimmed();
+        if (baseName.isEmpty()) baseName = QStringLiteral("structure_%1").arg(fileIndex + 1);
+        const QString outputPath = QDir(inputInfo.absolutePath()).filePath(baseName + QStringLiteral("_UMA.vasp"));
+        QTemporaryDir itemTempDir;
+        if (!itemTempDir.isValid()) {
+            failed << inputInfo.fileName();
+            const QString message = QStringLiteral("[ASEapp] FAILED TO CREATE TEMP DIRECTORY: %1\n").arg(inputInfo.fileName());
+            appendUmaLog(message); persistentLog.write(message.toUtf8());
+            continue;
+        }
+        const QString summaryPath = QDir(itemTempDir.path()).filePath(QStringLiteral("summary.json"));
+
+        QStringList arguments = commandParts;
+        arguments << workerPath << QStringLiteral("--input") << inputPath
+                  << QStringLiteral("--output") << outputPath << QStringLiteral("--summary") << summaryPath
+                  << QStringLiteral("--model") << modelInfo.absoluteFilePath() << QStringLiteral("--task") << taskName
+                  << QStringLiteral("--device") << device << QStringLiteral("--fmax") << QString::number(std::max(0.001, options.fmax), 'g', 10)
+                  << QStringLiteral("--steps") << QString::number(std::max(1, options.maxSteps));
+        if (options.fixSelectiveAtoms) arguments << QStringLiteral("--fix-selective");
+
+        const QString section = QStringLiteral("\n========== [%1/%2] %3 ==========\n[ASEapp] Command: %4 %5\n")
+            .arg(fileIndex + 1).arg(inputPaths.size()).arg(inputInfo.fileName(), program, arguments.join(QLatin1Char(' ')));
+        appendUmaLog(section);
+        persistentLog.write(section.toUtf8());
+        persistentLog.flush();
+        progress.setLabelText(m_japanese
+            ? QStringLiteral("%1 / %2 を処理中:\n%3\n詳細はUMA live logで確認できます。").arg(fileIndex + 1).arg(inputPaths.size()).arg(inputInfo.fileName())
+            : QStringLiteral("Processing %1 / %2:\n%3\nSee UMA live log for details.").arg(fileIndex + 1).arg(inputPaths.size()).arg(inputInfo.fileName()));
+        progress.setValue(fileIndex);
+
+        QProcess process;
+        process.setProcessChannelMode(QProcess::MergedChannels);
+        connect(&process, &QProcess::readyReadStandardOutput, this, [&]() {
+            const QString chunk = QString::fromUtf8(process.readAllStandardOutput());
+            appendUmaLog(chunk);
+            persistentLog.write(chunk.toUtf8());
+            persistentLog.flush();
+        });
+        process.start(program, arguments);
+        if (!process.waitForStarted(10000)) {
+            const QString message = QStringLiteral("[ASEapp] FAILED TO START: %1\n").arg(inputInfo.fileName());
+            appendUmaLog(message); persistentLog.write(message.toUtf8());
+            failed << inputInfo.fileName();
+            continue;
+        }
+        while (process.state() != QProcess::NotRunning) {
+            process.waitForFinished(100);
+            QApplication::processEvents(QEventLoop::AllEvents, 100);
+            if (progress.wasCanceled()) {
+                canceled = true;
+                process.kill();
+                process.waitForFinished(5000);
+                break;
+            }
+        }
+        const QString residual = QString::fromUtf8(process.readAllStandardOutput());
+        if (!residual.isEmpty()) { appendUmaLog(residual); persistentLog.write(residual.toUtf8()); }
+        if (canceled) break;
+        if (process.exitStatus() == QProcess::NormalExit && process.exitCode() == 0 && QFileInfo::exists(outputPath)) {
+            succeeded << outputPath;
+            const QString message = QStringLiteral("[ASEapp] OK: %1\n").arg(QDir::toNativeSeparators(outputPath));
+            appendUmaLog(message); persistentLog.write(message.toUtf8());
+        } else {
+            failed << inputInfo.fileName();
+            const QString message = QStringLiteral("[ASEapp] FAILED (exit %1): %2\n").arg(process.exitCode()).arg(inputInfo.fileName());
+            appendUmaLog(message); persistentLog.write(message.toUtf8());
+        }
+        persistentLog.flush();
+    }
+    progress.setValue(inputPaths.size());
+    progress.close();
+
+    const QString resultMessage = canceled
+        ? (m_japanese ? QStringLiteral("UMAバッチをキャンセルしました（成功 %1、失敗 %2）。").arg(succeeded.size()).arg(failed.size())
+                      : QStringLiteral("UMA batch canceled (%1 succeeded, %2 failed).").arg(succeeded.size()).arg(failed.size()))
+        : (m_japanese ? QStringLiteral("UMAバッチが完了しました（成功 %1、失敗 %2）。").arg(succeeded.size()).arg(failed.size())
+                      : QStringLiteral("UMA batch finished (%1 succeeded, %2 failed).").arg(succeeded.size()).arg(failed.size()));
+    finishUmaLog(resultMessage);
+    persistentLog.write(QStringLiteral("\n[ASEapp] %1\n").arg(resultMessage).toUtf8());
+    persistentLog.close();
+
+    QMessageBox resultBox(failed.isEmpty() && !canceled ? QMessageBox::Information : QMessageBox::Warning,
+        m_japanese ? QStringLiteral("UMAバッチ結果") : QStringLiteral("UMA batch result"),
+        QStringLiteral("%1\n\n%2\n%3").arg(resultMessage,
+            m_japanese ? QStringLiteral("出力: 各元ファイルと同じフォルダー（元ファイル名_UMA.vasp）") : QStringLiteral("Output: beside each source file (<original name>_UMA.vasp)"),
+            m_japanese ? QStringLiteral("ログ: %1").arg(QDir::toNativeSeparators(persistentLogPath)) : QStringLiteral("Log: %1").arg(QDir::toNativeSeparators(persistentLogPath))),
+        QMessageBox::Ok, this);
+    if (!failed.isEmpty()) resultBox.setDetailedText((m_japanese ? QStringLiteral("失敗したファイル:\n") : QStringLiteral("Failed files:\n")) + failed.join(QLatin1Char('\n')));
+    resultBox.exec();
 }
 
 void MainWindow::saveStructureAs() {
-    QString selectedFilter;
-    QString path = QFileDialog::getSaveFileName(this, "Save structure", defaultOpenDirectory() + "/" +
-        (m_structure.title.isEmpty() ? "surface_model.aseproj" : m_structure.title + ".aseproj"),
-        "ASEapp project (*.aseproj *.json);;CIF crystallographic file (*.cif);;Extended XYZ for ASE (*.extxyz *.xyz);;Plain XYZ coordinates only (*.xyz);;VASP POSCAR (*.vasp POSCAR CONTCAR *.poscar)",
+    QString selectedFilter = QStringLiteral("VASP POSCAR (*.vasp POSCAR CONTCAR *.poscar)");
+    const QString suggestedBaseName = safeBaseFileName(m_structure.title, QStringLiteral("surface_model"));
+    QString path = QFileDialog::getSaveFileName(this, "Save structure",
+        QDir(defaultOpenDirectory()).filePath(suggestedBaseName + QStringLiteral(".vasp")),
+        "VASP POSCAR (*.vasp POSCAR CONTCAR *.poscar);;ASEapp project (*.aseproj *.json);;CIF crystallographic file (*.cif);;Extended XYZ for ASE (*.extxyz *.xyz);;Plain XYZ coordinates only (*.xyz)",
         &selectedFilter);
     if (path.isEmpty()) return;
 
@@ -5589,6 +6049,292 @@ void MainWindow::applySelectedPreset() {
             : (expandedForPlacement
                 ? QStringLiteral("Placed %1 %2 time(s) after expanding the vacuum region").arg(rule.element).arg(std::max(addedCount, 1))
                 : QStringLiteral("Placed %1 %2 time(s)").arg(rule.element).arg(std::max(addedCount, 1))),
+        4000);
+}
+
+void MainWindow::replaceSelectedAtomsElement() {
+    if (m_selectedAtomIds.empty()) {
+        statusBar()->showMessage(
+            m_japanese ? QStringLiteral("置換する選択原子がありません。") : QStringLiteral("No selected atoms to replace."),
+            2500);
+        return;
+    }
+
+    const std::vector<int> selectedIndices = selectedAtomStructureIndices();
+    if (selectedIndices.empty()) {
+        statusBar()->showMessage(
+            m_japanese ? QStringLiteral("選択原子が現在の構造に見つかりません。") : QStringLiteral("Selected atoms were not found in the current structure."),
+            2500);
+        return;
+    }
+
+    const QString element = canonicalElementSymbol(m_elementCombo == nullptr ? QStringLiteral("H") : m_elementCombo->currentText());
+    if (m_elementCombo != nullptr) {
+        if (m_elementCombo->findText(element, Qt::MatchFixedString) < 0) {
+            m_elementCombo->addItem(element);
+        }
+        m_elementCombo->setCurrentText(element);
+    }
+
+    int changedCount = 0;
+    for (int index : selectedIndices) {
+        const auto& atom = m_structure.atoms[static_cast<std::size_t>(index)];
+        if (atom.element.compare(element, Qt::CaseInsensitive) != 0) {
+            ++changedCount;
+        }
+    }
+    if (changedCount == 0) {
+        statusBar()->showMessage(
+            m_japanese
+                ? QStringLiteral("選択原子はすでに %1 です。").arg(element)
+                : QStringLiteral("Selected atoms are already %1.").arg(element),
+            2500);
+        return;
+    }
+
+    StructureData updated = m_structure;
+    for (int index : selectedIndices) {
+        auto& atom = updated.atoms[static_cast<std::size_t>(index)];
+        atom.element = element;
+        atom.tag = QStringLiteral("%1-%2").arg(element).arg(atom.atomId, 4, 10, QChar('0'));
+        atom.color = vestaElementColor(element);
+        atom.radius = vestaElementRadius(element);
+    }
+
+    const std::vector<int> selectedAtomIds = m_selectedAtomIds;
+    replaceStructureFromEdit(updated, QStringLiteral("replace_element"));
+    setSelectedAtomIds(selectedAtomIds);
+    refreshSelectionUi();
+    refreshPresetUi();
+    refreshPoseUi();
+
+    statusBar()->showMessage(
+        m_japanese
+            ? QStringLiteral("%1 個の選択原子を %2 に置換しました。").arg(changedCount).arg(element)
+            : QStringLiteral("Replaced %1 selected atom(s) with %2.").arg(changedCount).arg(element),
+        3500);
+}
+
+void MainWindow::placeRelativeToSelectedAtoms() {
+    if (m_selectedAtomIds.empty()) {
+        statusBar()->showMessage(
+            m_japanese ? QStringLiteral("相対配置の起点になる選択原子がありません。") : QStringLiteral("No selected atom to use as a relative placement anchor."),
+            2500);
+        return;
+    }
+
+    const std::vector<int> selectedIndices = selectedAtomStructureIndices();
+    if (selectedIndices.empty()) {
+        statusBar()->showMessage(
+            m_japanese ? QStringLiteral("選択原子が現在の構造に見つかりません。") : QStringLiteral("Selected atoms were not found in the current structure."),
+            2500);
+        return;
+    }
+
+    QDialog dialog(this);
+    dialog.setWindowTitle(m_japanese ? QStringLiteral("選択原子から相対配置") : QStringLiteral("Relative atom placement"));
+    auto* layout = new QVBoxLayout(&dialog);
+    auto* hint = new QLabel(
+        m_japanese
+            ? QStringLiteral("位置 = 起点原子 + 正規化した方向 × 距離。任意の方向ベクトルやセル軸/法線プリセットを使えます。")
+            : QStringLiteral("Position = anchor atom + normalized direction × distance. Use any direction vector or cell-axis/normal presets."),
+        &dialog);
+    hint->setWordWrap(true);
+    layout->addWidget(hint);
+
+    auto* form = new QFormLayout();
+    auto* elementCombo = new QComboBox(&dialog);
+    elementCombo->setEditable(true);
+    elementCombo->addItems(periodicElementSymbols());
+    elementCombo->setCurrentText(canonicalElementSymbol(m_elementCombo == nullptr ? QStringLiteral("H") : m_elementCombo->currentText()));
+    form->addRow(uiText(QStringLiteral("element")), elementCombo);
+
+    auto* distanceSpin = new QDoubleSpinBox(&dialog);
+    distanceSpin->setRange(0.0, 1000.0);
+    distanceSpin->setDecimals(4);
+    distanceSpin->setSingleStep(0.05);
+    distanceSpin->setSuffix(QStringLiteral(" Å"));
+    distanceSpin->setValue(m_placementHeightSpin == nullptr ? 1.05 : std::max(0.0, std::abs(m_placementHeightSpin->value())));
+    form->addRow(m_japanese ? QStringLiteral("距離") : QStringLiteral("Distance"), distanceSpin);
+
+    auto* directionPresetCombo = new QComboBox(&dialog);
+    directionPresetCombo->addItem(QStringLiteral("+X"), QStringLiteral("+x"));
+    directionPresetCombo->addItem(QStringLiteral("-X"), QStringLiteral("-x"));
+    directionPresetCombo->addItem(QStringLiteral("+Y"), QStringLiteral("+y"));
+    directionPresetCombo->addItem(QStringLiteral("-Y"), QStringLiteral("-y"));
+    directionPresetCombo->addItem(QStringLiteral("+Z"), QStringLiteral("+z"));
+    directionPresetCombo->addItem(QStringLiteral("-Z"), QStringLiteral("-z"));
+    directionPresetCombo->addItem(QStringLiteral("+a"), QStringLiteral("+a"));
+    directionPresetCombo->addItem(QStringLiteral("-a"), QStringLiteral("-a"));
+    directionPresetCombo->addItem(QStringLiteral("+b"), QStringLiteral("+b"));
+    directionPresetCombo->addItem(QStringLiteral("-b"), QStringLiteral("-b"));
+    directionPresetCombo->addItem(QStringLiteral("+c"), QStringLiteral("+c"));
+    directionPresetCombo->addItem(QStringLiteral("-c"), QStringLiteral("-c"));
+    directionPresetCombo->addItem(m_japanese ? QStringLiteral("スラブ法線") : QStringLiteral("Slab normal"), QStringLiteral("+normal"));
+    directionPresetCombo->addItem(m_japanese ? QStringLiteral("逆スラブ法線") : QStringLiteral("Opposite slab normal"), QStringLiteral("-normal"));
+    form->addRow(m_japanese ? QStringLiteral("方向プリセット") : QStringLiteral("Direction preset"), directionPresetCombo);
+
+    auto createDirectionSpin = [&dialog]() {
+        auto* spin = new QDoubleSpinBox(&dialog);
+        spin->setRange(-1000000.0, 1000000.0);
+        spin->setDecimals(6);
+        spin->setSingleStep(0.1);
+        return spin;
+    };
+    auto* directionXSpin = createDirectionSpin();
+    auto* directionYSpin = createDirectionSpin();
+    auto* directionZSpin = createDirectionSpin();
+    auto* directionWidget = new QWidget(&dialog);
+    auto* directionLayout = new QHBoxLayout(directionWidget);
+    directionLayout->setContentsMargins(0, 0, 0, 0);
+    directionLayout->addWidget(new QLabel(QStringLiteral("x"), directionWidget));
+    directionLayout->addWidget(directionXSpin);
+    directionLayout->addWidget(new QLabel(QStringLiteral("y"), directionWidget));
+    directionLayout->addWidget(directionYSpin);
+    directionLayout->addWidget(new QLabel(QStringLiteral("z"), directionWidget));
+    directionLayout->addWidget(directionZSpin);
+    form->addRow(m_japanese ? QStringLiteral("方向ベクトル") : QStringLiteral("Direction vector"), directionWidget);
+
+    auto* allSelectedCheck = new QCheckBox(
+        m_japanese ? QStringLiteral("選択中の全原子を起点にする") : QStringLiteral("Place from every selected atom"),
+        &dialog);
+    allSelectedCheck->setChecked(true);
+    allSelectedCheck->setEnabled(selectedIndices.size() > 1);
+    form->addRow(QString(), allSelectedCheck);
+    layout->addLayout(form);
+
+    auto normalizedAxis = [](const QVector3D& value, const QVector3D& fallback) {
+        return value.lengthSquared() > 1.0e-12f ? value.normalized() : fallback;
+    };
+    auto directionForKey = [this, normalizedAxis](const QString& key) {
+        if (key == QStringLiteral("+x")) return QVector3D(1.0f, 0.0f, 0.0f);
+        if (key == QStringLiteral("-x")) return QVector3D(-1.0f, 0.0f, 0.0f);
+        if (key == QStringLiteral("+y")) return QVector3D(0.0f, 1.0f, 0.0f);
+        if (key == QStringLiteral("-y")) return QVector3D(0.0f, -1.0f, 0.0f);
+        if (key == QStringLiteral("+z")) return QVector3D(0.0f, 0.0f, 1.0f);
+        if (key == QStringLiteral("-z")) return QVector3D(0.0f, 0.0f, -1.0f);
+        if (key == QStringLiteral("+a")) return normalizedAxis(m_structure.cellVectors[0], QVector3D(1.0f, 0.0f, 0.0f));
+        if (key == QStringLiteral("-a")) return normalizedAxis(m_structure.cellVectors[0], QVector3D(1.0f, 0.0f, 0.0f)) * -1.0f;
+        if (key == QStringLiteral("+b")) return normalizedAxis(m_structure.cellVectors[1], QVector3D(0.0f, 1.0f, 0.0f));
+        if (key == QStringLiteral("-b")) return normalizedAxis(m_structure.cellVectors[1], QVector3D(0.0f, 1.0f, 0.0f)) * -1.0f;
+        if (key == QStringLiteral("+c")) return normalizedAxis(m_structure.cellVectors[2], QVector3D(0.0f, 0.0f, 1.0f));
+        if (key == QStringLiteral("-c")) return normalizedAxis(m_structure.cellVectors[2], QVector3D(0.0f, 0.0f, 1.0f)) * -1.0f;
+        const QVector3D normal = normalizedAxis(surfaceNormalForStructure(m_structure), QVector3D(0.0f, 0.0f, 1.0f));
+        if (key == QStringLiteral("-normal")) {
+            return normal * -1.0f;
+        }
+        return normal;
+    };
+    auto setDirection = [directionXSpin, directionYSpin, directionZSpin, normalizedAxis](const QVector3D& value) {
+        const QVector3D direction = normalizedAxis(value, QVector3D(0.0f, 0.0f, 1.0f));
+        directionXSpin->setValue(static_cast<double>(direction.x()));
+        directionYSpin->setValue(static_cast<double>(direction.y()));
+        directionZSpin->setValue(static_cast<double>(direction.z()));
+    };
+    connect(directionPresetCombo, QOverload<int>::of(&QComboBox::currentIndexChanged), &dialog, [directionPresetCombo, directionForKey, setDirection]() {
+        setDirection(directionForKey(directionPresetCombo->currentData().toString()));
+    });
+    const int normalPresetIndex = directionPresetCombo->findData(QStringLiteral("+normal"));
+    if (normalPresetIndex >= 0) {
+        directionPresetCombo->setCurrentIndex(normalPresetIndex);
+    }
+    setDirection(directionForKey(directionPresetCombo->currentData().toString()));
+
+    auto* buttons = new QDialogButtonBox(QDialogButtonBox::Ok | QDialogButtonBox::Cancel, &dialog);
+    connect(buttons, &QDialogButtonBox::accepted, &dialog, &QDialog::accept);
+    connect(buttons, &QDialogButtonBox::rejected, &dialog, &QDialog::reject);
+    layout->addWidget(buttons);
+
+    QVector3D direction;
+    bool accepted = false;
+    while (dialog.exec() == QDialog::Accepted) {
+        direction = QVector3D(
+            static_cast<float>(directionXSpin->value()),
+            static_cast<float>(directionYSpin->value()),
+            static_cast<float>(directionZSpin->value()));
+        if (direction.lengthSquared() <= 1.0e-12f) {
+            QMessageBox::warning(
+                this,
+                m_japanese ? QStringLiteral("相対配置") : QStringLiteral("Relative placement"),
+                m_japanese ? QStringLiteral("方向ベクトルが 0 です。x/y/z のいずれかを指定してください。") : QStringLiteral("Direction vector is zero. Set at least one of x/y/z."));
+            continue;
+        }
+        direction.normalize();
+        accepted = true;
+        break;
+    }
+    if (!accepted) {
+        return;
+    }
+
+    const QString element = canonicalElementSymbol(elementCombo->currentText());
+    if (m_elementCombo != nullptr) {
+        if (m_elementCombo->findText(element, Qt::MatchFixedString) < 0) {
+            m_elementCombo->addItem(element);
+        }
+        m_elementCombo->setCurrentText(element);
+    }
+
+    const double distance = distanceSpin->value();
+    std::vector<int> targetIndices;
+    if (allSelectedCheck->isChecked()) {
+        targetIndices = selectedIndices;
+    } else {
+        targetIndices = {selectedIndices.front()};
+    }
+
+    StructureData updated = m_structure;
+    const int baseAtomCount = static_cast<int>(updated.atoms.size());
+    int nextId = nextAtomIdForStructure(updated);
+    std::vector<int> addedAtomIds;
+    addedAtomIds.reserve(targetIndices.size());
+    for (int index : targetIndices) {
+        const auto& anchor = m_structure.atoms[static_cast<std::size_t>(index)];
+        NativeAtom atom;
+        atom.atomId = nextId++;
+        atom.element = element;
+        atom.tag = QStringLiteral("%1-%2").arg(element).arg(atom.atomId, 4, 10, QChar('0'));
+        atom.cartesian = anchor.cartesian + direction * static_cast<float>(distance);
+        atom.fractional = solveFractionalForCell(updated.cellVectors, atom.cartesian);
+        atom.color = vestaElementColor(element);
+        atom.radius = vestaElementRadius(element);
+        atom.movable = {true, true, true};
+        updated.atoms.push_back(atom);
+        addedAtomIds.push_back(atom.atomId);
+    }
+    updated.dirty = true;
+
+    const bool expandedForPlacement = newAtomsOutsideUnitCell(updated, baseAtomCount);
+    if (expandedForPlacement) {
+        const QString title = m_japanese ? QStringLiteral("相対配置") : QStringLiteral("Relative placement");
+        if (!confirmPlacementVacuumExpansion(this, m_japanese, title)) {
+            statusBar()->showMessage(
+                m_japanese
+                    ? QStringLiteral("相対配置がセル外のためキャンセルしました。")
+                    : QStringLiteral("Relative placement canceled because the new atom is outside the cell."),
+                4000);
+            return;
+        }
+        updated = expandCellToContainNewAtoms(updated, baseAtomCount);
+    }
+
+    replaceStructureFromEdit(updated, QStringLiteral("relative_placement"));
+    setSelectedAtomIds(addedAtomIds);
+    if (m_previewPlacementCheck != nullptr) {
+        m_previewPlacementCheck->setChecked(false);
+    }
+    refreshSelectionUi();
+    refreshPresetUi();
+    refreshPoseUi();
+
+    statusBar()->showMessage(
+        m_japanese
+            ? (expandedForPlacement
+                ? QStringLiteral("%1 を %2 個、選択原子から %3 Å に配置し、真空層を自動追加しました。").arg(element).arg(static_cast<int>(addedAtomIds.size())).arg(distance, 0, 'f', 3)
+                : QStringLiteral("%1 を %2 個、選択原子から %3 Å に配置しました。").arg(element).arg(static_cast<int>(addedAtomIds.size())).arg(distance, 0, 'f', 3))
+            : (expandedForPlacement
+                ? QStringLiteral("Placed %1 atom(s) of %2 at %3 Å from selection after expanding the vacuum region.").arg(static_cast<int>(addedAtomIds.size())).arg(element).arg(distance, 0, 'f', 3)
+                : QStringLiteral("Placed %1 atom(s) of %2 at %3 Å from selection.").arg(static_cast<int>(addedAtomIds.size())).arg(element).arg(distance, 0, 'f', 3)),
         4000);
 }
 
@@ -6781,10 +7527,14 @@ void MainWindow::setSelectedAtomsFixed(bool fixed) {
         }
     }
     if (changedCount == 0) {
+        setSelectedAtomIds({});
+        refreshSelectionUi();
+        refreshPresetUi();
+        refreshPoseUi();
         statusBar()->showMessage(
             fixed
-                ? (m_japanese ? QStringLiteral("選択原子はすでに固定されています。") : QStringLiteral("Selected atoms are already fixed."))
-                : (m_japanese ? QStringLiteral("選択原子はすでに固定解除されています。") : QStringLiteral("Selected atoms are already unfixed.")),
+                ? (m_japanese ? QStringLiteral("選択原子はすでに固定されています。選択を解除しました。") : QStringLiteral("Selected atoms are already fixed; selection cleared."))
+                : (m_japanese ? QStringLiteral("選択原子はすでに固定解除されています。選択を解除しました。") : QStringLiteral("Selected atoms are already unfixed; selection cleared.")),
             2500);
         return;
     }
@@ -6794,9 +7544,8 @@ void MainWindow::setSelectedAtomsFixed(bool fixed) {
         updated.atoms[static_cast<std::size_t>(index)].movable = targetMovable;
     }
 
-    const std::vector<int> selectedAtomIds = m_selectedAtomIds;
     replaceStructureFromEdit(updated, fixed ? QStringLiteral("fix_atoms") : QStringLiteral("unfix_atoms"));
-    setSelectedAtomIds(selectedAtomIds);
+    setSelectedAtomIds({});
     refreshSelectionUi();
     refreshPresetUi();
     refreshPoseUi();
@@ -7122,6 +7871,8 @@ void MainWindow::refreshSelectionUi() {
         m_selectionLabel->setText(text);
     }
     if (m_deleteSelectedButton != nullptr) m_deleteSelectedButton->setEnabled(!m_selectedAtomIds.empty());
+    if (m_replaceSelectedElementButton != nullptr) m_replaceSelectedElementButton->setEnabled(!m_selectedAtomIds.empty());
+    if (m_placeRelativeButton != nullptr) m_placeRelativeButton->setEnabled(!m_selectedAtomIds.empty());
     if (m_fixSelectedButton != nullptr) m_fixSelectedButton->setEnabled(!m_selectedAtomIds.empty());
     if (m_unfixSelectedButton != nullptr) m_unfixSelectedButton->setEnabled(!m_selectedAtomIds.empty());
     refreshPrecursorUi();

@@ -83,11 +83,35 @@ ASEapp Surface Builder 繧ｯ繧､繝・け繧ｹ繧ｿ繝ｼ繝・
 UMA relaxation
 --------------
 - Open Settings > App settings > UMA.
-- Set the Python command, for example:
-  python
-  conda run -n uma_proj python
-  C:\path\to\python.exe
+- Keep the Python command as `auto` (recommended). ASEapp first detects the
+  `uma_proj` conda environment, then another conda environment containing
+  fairchem-core. You can also specify C:\path\to\python.exe explicitly.
 - Set the default UMA checkpoint path, task name (default: oc20), device, fmax, and max steps.
 - Run Structure > UMA relaxation, or use the UMA relaxation button in the Supercell/Vacuum panel.
-- Confirm or change the task, convergence threshold (fmax), max steps, device, and fixed-atom handling in the run-settings window, then start the run.
+  - Confirm or change the task, convergence threshold (fmax), max steps, device, and fixed-atom handling in the run-settings window, then start the run.
+  - The UMA live log window remains visible during execution and shows the FIRE step, energy, and fmax. A persistent copy is saved in the app-local `uma_logs` folder.
+  - Use Structure > UMA batch... to select multiple input files and apply the same UMA settings sequentially. Each result is saved beside its source as `<original name>_UMA.vasp`.
 - The current structure is exported to a temporary extXYZ file, relaxed by ASE/fairchem/UMA in a separate Python process, then loaded back into the canvas.
+- Dropping multiple local structure files onto the window loads all of them into separate tabs.
+- Use File > DFT input batch, choose multiple structures, configure the SIESTA/QE parameters once, and export to generate all inputs with that shared parameter set.
+
+SIESTA result analysis
+----------------------
+- Open File > SIESTA results (Ctrl+Alt+S).
+- Add one or more .out/.log files, add a folder recursively, or drag and drop files/folders into the analyzer.
+- Compare run status, geometry steps, E_KS/FreeEng, raw/constrained/residual force, force/DM/stress threshold ratios, stress tensor, cell parameters, and complete SCF histories.
+- Switch the convergence graph between energy, free energy, force/stress ratio, SCF iterations, DM ratio, and cell volume. Ratio thresholds are shown at 1.0.
+- The Convergence overview tab places Energy, Force/threshold, and final SCF dDmax/threshold side by side. The dashboard above them shows run state, latest energy/delta, and configured-vs-latest Force, SCF, and Stress values with color-coded PASS/not-converged status. Use the SCF convergence tab to select a geometry step and inspect its SCF energy and residual path; y=1 is the convergence boundary.
+- On any SIESTA graph, rotate the mouse wheel to zoom around the cursor and drag with the left mouse button to pan. Zooming back out stops at the initial full-data maximum; Reset or double-click restores that range immediately.
+- Enable 3-second auto refresh to monitor output files while SIESTA is running.
+- Export the multi-file summary, detailed geometry/SCF CSV, complete JSON, or the current graph as PNG.
+
+SIESTA final structure to VASP
+------------------------------
+- Open File > SIESTA final -> VASP (Ctrl+Shift+Alt+S).
+- Select or drag a final_structure.txt or SIESTA output into the conversion screen. Geometry analysis runs in the background; the screen previews atoms, elements, constraints, cell lengths, coordinate mode, and destination before conversion.
+- The importer uses an embedded STRUCT_OUT, XV, or final outcoor block and converts Bohr to Angstrom where required.
+- ChemicalSpeciesLabel virtual atoms (200 + Z), pseudo-H labels, and Geometry.Constraints are preserved; constraints are written as standard VASP Selective dynamics flags.
+- If the selected output has no physical cell, ASEapp first searches the same folder; use Change to select an FDF, SIESTA output, or VASP/POSCAR file when automatic detection is not possible.
+- The default output name uses the input file's SIESTA SystemLabel/Label (for example, `ideal_9layer.vasp`). If no label exists, ASEapp falls back to the source filename.
+- After saving, ASEapp automatically opens the generated VASP file in a structure tab.

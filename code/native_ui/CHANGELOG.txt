@@ -1,14 +1,29 @@
-ASEapp Surface Builder CHANGELOG
+﻿ASEapp Surface Builder CHANGELOG
 ================================
 
 Unreleased
 ----------
+- Integrate SIESTA final-structure to VASP conversion for embedded STRUCT_OUT, XV, and final outcoor data, including Bohr conversion, virtual/pseudo species, Geometry.Constraints to standard Selective dynamics, external cell selection when needed, and automatic opening of the saved VASP file.
+- Refactor SIESTA final conversion into dedicated converter, VASP writer, and dialog classes. Replace the previous sequence of file dialogs with one drag-and-drop-capable review screen, background analysis, automatic cell discovery, inline validation, atom/element/constraint/cell preview, coordinate selection, and convert-and-open action.
 - Fix macOS QOpenGLWidget context setup so the canvas no longer shows mirrored stale UI content on startup.
 - Make Esc reliably clear atom selection by removing duplicate shortcut registration and letting the structure canvas handle Esc directly.
 - Keep atom spheres strictly scene-scaled by removing the screen-space radius floor/density zoom scaling that made atoms inflate when zooming out, and remove fixed supercell multiplier/matrix/volume caps.
 - Add configurable UMA relaxation from the Structure menu and surface panel. A run-settings window now lets users adjust the UMA model checkpoint path, Python command, task, device, fmax threshold, max steps, and selective-dynamics handling immediately before execution, then saves those values to the app settings JSON.
 - Add a Python UMA worker script that runs ASE/fairchem in a separate process and reloads the optimized extXYZ result into the canvas.
+- Automatically select the `uma_proj` (or another fairchem-enabled conda) Python for UMA, instead of accidentally using an unrelated PATH Python without fairchem-core.
+- Show a live UMA log window with checkpoint/loading, energy, force, and FIRE step output, and preserve each run under the app-local `uma_logs` folder.
+- Add sequential UMA batch relaxation for multiple selected structure files with shared settings, per-file results, cancellation, and a combined log.
+- Save UMA results beside each source as `<original name>_UMA.vasp`; single-file and batch runs use the same naming rule.
+- Add a dedicated DFT input batch command that applies one configured SIESTA/QE parameter set to all selected structures.
+- Load every local structure file from a multi-file drag-and-drop operation, opening the structures in separate tabs.
 - Rebuild Windows packages against official The Qt Company signed Qt 6.8.3 runtime DLLs, avoiding Smart App Control / Code Integrity failures from unsigned conda Qt, OpenSSL, and zstd DLLs.
+- Added an integrated, multi-file SIESTA result analyzer with convergence plots, force/DM/stress threshold ratios, complete SCF energy columns, raw/constrained/residual forces, stress tensors, cell histories, output-tail monitoring, drag-and-drop folder loading, change-aware automatic refresh, file removal, and summary/detail CSV, JSON, and graph PNG export.
+- Added an original-viewer-style convergence overview that displays energy, force/MD.MaxForceTol, and final SCF dDmax/DM.Tolerance together, plus geometry-step selection for inspecting the complete SCF energy and residual path with explicit PASS/incomplete diagnostics.
+- Arrange the three convergence overview graphs horizontally, force the summary table text to readable black, and add color-coded run/energy/force/SCF/stress dashboard cards showing configured thresholds, latest values, ratios, and convergence state at a glance.
+- Improve Geometry/SCF history readability with white and subtly alternating row backgrounds, dark text, and clearer grid/header colors. Force the SCF Geometry-step selector to use a compact, scrollable 10-row Qt popup because the native Windows popup otherwise ignores the visible-item limit and expands to nearly the full screen.
+- Add interactive zooming to every SIESTA overview, detail, and SCF graph: mouse-wheel zoom anchored at the cursor, left-drag panning, and Reset-button/double-click restoration of the full data range. Preserve the current view while live data refreshes.
+- Cap mouse-wheel zoom-out and panning at each graph's initial full-data range; scrolling back now returns to the automatic maximum view instead of expanding beyond it.
+- Use the SIESTA `SystemLabel`/`Label` as the default final-structure VASP filename (for example, `ideal_9layer.vasp`), with safe filename sanitization and source-name fallback when no label is present.
 
 Version 1.3.3 - Vacuum placement and large-scene UX fixes
 ---------------------------------------------------------
@@ -59,55 +74,55 @@ Version 1.2.0 - VESTA-like display and startup polish
 
 Version 1.1.2 - Refactor and verified Windows rebuild
 ------------------------------------------------------
-- 起動時の Qt plugin path 設定を AppStartup に分離し、main.cpp を起動フローへ集中させました。
-- 単一起動と既存ウィンドウへのファイル転送を SingleInstance に分離しました。
-- Windows standalone launcher の HANDLE / LocalFree 管理を RAII 化し、機能を変えずに解放経路を単純化しました。
-- VERSIONING.md を追加し、今後の SemVer ベースの番号付け基準を明文化しました。
-- Windows 単体 launcher / ZIP を v1.1.2 として再生成し、Release build、CTest、起動確認、署名確認を実施しました。
+- 襍ｷ蜍墓凾縺ｮ Qt plugin path 險ｭ螳壹ｒ AppStartup 縺ｫ蛻・屬縺励［ain.cpp 繧定ｵｷ蜍輔ヵ繝ｭ繝ｼ縺ｸ髮・ｸｭ縺輔○縺ｾ縺励◆縲・
+- 蜊倅ｸ襍ｷ蜍輔→譌｢蟄倥え繧｣繝ｳ繝峨え縺ｸ縺ｮ繝輔ぃ繧､繝ｫ霆｢騾√ｒ SingleInstance 縺ｫ蛻・屬縺励∪縺励◆縲・
+- Windows standalone launcher 縺ｮ HANDLE / LocalFree 邂｡逅・ｒ RAII 蛹悶＠縲∵ｩ溯・繧貞､峨∴縺壹↓隗｣謾ｾ邨瑚ｷｯ繧貞腰邏泌喧縺励∪縺励◆縲・
+- VERSIONING.md 繧定ｿｽ蜉縺励∽ｻ雁ｾ後・ SemVer 繝吶・繧ｹ縺ｮ逡ｪ蜿ｷ莉倥￠蝓ｺ貅悶ｒ譏取枚蛹悶＠縺ｾ縺励◆縲・
+- Windows 蜊倅ｽ・launcher / ZIP 繧・v1.1.2 縺ｨ縺励※蜀咲函謌舌＠縲ヽelease build縲，Test縲∬ｵｷ蜍慕｢ｺ隱阪∫ｽｲ蜷咲｢ｺ隱阪ｒ螳滓命縺励∪縺励◆縲・
 
-- CIF 読み込み時に `_space_group_symop_operation_xyz` / `_symmetry_equiv_pos_as_xyz` の対称操作を展開し、代表点だけでなく単位胞内の原子を描画するように修正。
-- CIF のインラインコメントを quote-aware に無視し、セル値や対称操作行の末尾コメントで読み込みが崩れないように修正。
-- VASP/POSCAR 保存で Direct / Cartesian を選択できるように変更。
-- 通常 XYZ 保存で Cartesian / 分率座標を選択できるように変更。extended XYZ は ASE 互換の Cartesian `pos` を維持。
-- Windows で2回目以降の起動に渡したファイルパスを既存ウィンドウへ送れるように修正。
-- Windows 起動時に Qt plugin path を実行ファイル周辺へ固定し、`no Qt platform plugin could be initialized` ダイアログが繰り返し出ないように修正。
-- README / Guide / QUICKSTART を CIF 対称性展開と保存座標形式に合わせて更新。
+- CIF 隱ｭ縺ｿ霎ｼ縺ｿ譎ゅ↓ `_space_group_symop_operation_xyz` / `_symmetry_equiv_pos_as_xyz` 縺ｮ蟇ｾ遘ｰ謫堺ｽ懊ｒ螻暮幕縺励∽ｻ｣陦ｨ轤ｹ縺縺代〒縺ｪ縺丞腰菴崎・蜀・・蜴溷ｭ舌ｒ謠冗判縺吶ｋ繧医≧縺ｫ菫ｮ豁｣縲・
+- CIF 縺ｮ繧､繝ｳ繝ｩ繧､繝ｳ繧ｳ繝｡繝ｳ繝医ｒ quote-aware 縺ｫ辟｡隕悶＠縲√そ繝ｫ蛟､繧・ｯｾ遘ｰ謫堺ｽ懆｡後・譛ｫ蟆ｾ繧ｳ繝｡繝ｳ繝医〒隱ｭ縺ｿ霎ｼ縺ｿ縺悟ｴｩ繧後↑縺・ｈ縺・↓菫ｮ豁｣縲・
+- VASP/POSCAR 菫晏ｭ倥〒 Direct / Cartesian 繧帝∈謚槭〒縺阪ｋ繧医≧縺ｫ螟画峩縲・
+- 騾壼ｸｸ XYZ 菫晏ｭ倥〒 Cartesian / 蛻・紫蠎ｧ讓吶ｒ驕ｸ謚槭〒縺阪ｋ繧医≧縺ｫ螟画峩縲Ｆxtended XYZ 縺ｯ ASE 莠呈鋤縺ｮ Cartesian `pos` 繧堤ｶｭ謖√・
+- Windows 縺ｧ2蝗樒岼莉･髯阪・襍ｷ蜍輔↓貂｡縺励◆繝輔ぃ繧､繝ｫ繝代せ繧呈里蟄倥え繧｣繝ｳ繝峨え縺ｸ騾√ｌ繧九ｈ縺・↓菫ｮ豁｣縲・
+- Windows 襍ｷ蜍墓凾縺ｫ Qt plugin path 繧貞ｮ溯｡後ヵ繧｡繧､繝ｫ蜻ｨ霎ｺ縺ｸ蝗ｺ螳壹＠縲～no Qt platform plugin could be initialized` 繝繧､繧｢繝ｭ繧ｰ縺檎ｹｰ繧願ｿ斐＠蜃ｺ縺ｪ縺・ｈ縺・↓菫ｮ豁｣縲・
+- README / Guide / QUICKSTART 繧・CIF 蟇ｾ遘ｰ諤ｧ螻暮幕縺ｨ菫晏ｭ伜ｺｧ讓吝ｽ｢蠑上↓蜷医ｏ縺帙※譖ｴ譁ｰ縲・
 
 Version 1.1.1 - Single-instance tabs and atom-pair bond editing
 ---------------------------------------------------------------
-- アプリを単一起動に制限し、2回目以降の起動では新しいウィンドウを作らず既存ウィンドウを前面へ戻すように変更。
-- 構造タブを追加し、1つのウィンドウ内で複数構造を切り替えられるように変更。
-- Open は既定で新しいタブに読み込み、未編集の初期タブだけは置き換えるように変更。
-- 原子対ボンド長ダイアログを追加し、読み込まれている構造の全原子対距離を一覧・個別編集できるように変更。
-- README / QUICKSTART / 配布手順を v1.1.1 向けに更新。
+- 繧｢繝励Μ繧貞腰荳襍ｷ蜍輔↓蛻ｶ髯舌＠縲・蝗樒岼莉･髯阪・襍ｷ蜍輔〒縺ｯ譁ｰ縺励＞繧ｦ繧｣繝ｳ繝峨え繧剃ｽ懊ｉ縺壽里蟄倥え繧｣繝ｳ繝峨え繧貞燕髱｢縺ｸ謌ｻ縺吶ｈ縺・↓螟画峩縲・
+- 讒矩繧ｿ繝悶ｒ霑ｽ蜉縺励・縺､縺ｮ繧ｦ繧｣繝ｳ繝峨え蜀・〒隍・焚讒矩繧貞・繧頑崛縺医ｉ繧後ｋ繧医≧縺ｫ螟画峩縲・
+- Open 縺ｯ譌｢螳壹〒譁ｰ縺励＞繧ｿ繝悶↓隱ｭ縺ｿ霎ｼ縺ｿ縲∵悴邱ｨ髮・・蛻晄悄繧ｿ繝悶□縺代・鄂ｮ縺肴鋤縺医ｋ繧医≧縺ｫ螟画峩縲・
+- 蜴溷ｭ仙ｯｾ繝懊Φ繝蛾聞繝繧､繧｢繝ｭ繧ｰ繧定ｿｽ蜉縺励∬ｪｭ縺ｿ霎ｼ縺ｾ繧後※縺・ｋ讒矩縺ｮ蜈ｨ蜴溷ｭ仙ｯｾ霍晞屬繧剃ｸ隕ｧ繝ｻ蛟句挨邱ｨ髮・〒縺阪ｋ繧医≧縺ｫ螟画峩縲・
+- README / QUICKSTART / 驟榊ｸ・焔鬆・ｒ v1.1.1 蜷代￠縺ｫ譖ｴ譁ｰ縲・
 
 Version 1.1.0 - Adsorbate pose editing release
 ----------------------------------------------
-- 吸着分子ポーズ編集を追加し、選択原子群を剛体グループとして並進・回転できるように変更。
-- pivot 原子固定回転、選択中 2 原子の結合軸回転、選択結合長調整を追加。
-- 並進 / 回転 / 結合長調整のポーズプレビューを追加。
-- 2 原子間 / 3 原子間などの配置候補を、選択原子すべての中心へ統一。
-- VESTA SBOND 風の元素ペア別ボンド距離 min/max Å 設定を追加。
-- extended XYZ / adsorbate-only XYZ / pose JSON / ASE snippet 出力を追加。
-- Undo / Redo が構造、選択、吸着分子グループ情報を同期して復元するように修正。
-- トラックパッドのピンチズームを、ホイールと同じくカーソル位置基準で使えるように修正。
-- メタノール on Cu 実分子サンプルの GUI 自己テストと ASE round-trip テストを追加。
+- 蜷ｸ逹蛻・ｭ舌・繝ｼ繧ｺ邱ｨ髮・ｒ霑ｽ蜉縺励・∈謚槫次蟄千ｾ､繧貞央菴薙げ繝ｫ繝ｼ繝励→縺励※荳ｦ騾ｲ繝ｻ蝗櫁ｻ｢縺ｧ縺阪ｋ繧医≧縺ｫ螟画峩縲・
+- pivot 蜴溷ｭ仙崋螳壼屓霆｢縲・∈謚樔ｸｭ 2 蜴溷ｭ舌・邨仙粋霆ｸ蝗櫁ｻ｢縲・∈謚樒ｵ仙粋髟ｷ隱ｿ謨ｴ繧定ｿｽ蜉縲・
+- 荳ｦ騾ｲ / 蝗櫁ｻ｢ / 邨仙粋髟ｷ隱ｿ謨ｴ縺ｮ繝昴・繧ｺ繝励Ξ繝薙Η繝ｼ繧定ｿｽ蜉縲・
+- 2 蜴溷ｭ宣俣 / 3 蜴溷ｭ宣俣縺ｪ縺ｩ縺ｮ驟咲ｽｮ蛟呵｣懊ｒ縲・∈謚槫次蟄舌☆縺ｹ縺ｦ縺ｮ荳ｭ蠢・∈邨ｱ荳縲・
+- VESTA SBOND 鬚ｨ縺ｮ蜈・ｴ繝壹い蛻･繝懊Φ繝芽ｷ晞屬 min/max ﾃ・險ｭ螳壹ｒ霑ｽ蜉縲・
+- extended XYZ / adsorbate-only XYZ / pose JSON / ASE snippet 蜃ｺ蜉帙ｒ霑ｽ蜉縲・
+- Undo / Redo 縺梧ｧ矩縲・∈謚槭∝精逹蛻・ｭ舌げ繝ｫ繝ｼ繝玲ュ蝣ｱ繧貞酔譛溘＠縺ｦ蠕ｩ蜈・☆繧九ｈ縺・↓菫ｮ豁｣縲・
+- 繝医Λ繝・け繝代ャ繝峨・繝斐Φ繝√ぜ繝ｼ繝繧偵√・繧､繝ｼ繝ｫ縺ｨ蜷後§縺上き繝ｼ繧ｽ繝ｫ菴咲ｽｮ蝓ｺ貅悶〒菴ｿ縺医ｋ繧医≧縺ｫ菫ｮ豁｣縲・
+- 繝｡繧ｿ繝弱・繝ｫ on Cu 螳溷・蟄舌し繝ｳ繝励Ν縺ｮ GUI 閾ｪ蟾ｱ繝・せ繝医→ ASE round-trip 繝・せ繝医ｒ霑ｽ蜉縲・
 Version 1.0.0 - Final local release
 -----------------------------------
-- Windows 向け Qt ネイティブ UI を配布可能な ZIP / 単体 launcher として整備。
-- POSCAR / CONTCAR / .vasp / .xyz / .cif / .pdb / .xsf / .json / .aseproj / .vesta 読み込みに対応。
-- VESTA 風の原子表示、視点操作、原子選択、重なり選択を整備。
-- Ctrl + 左ドラッグで奥に重なった原子も選択可能に変更。
-- Esc で選択解除可能に変更。
-- 複数選択時の直上/直下配置を、選択全原子へ一括適用。
-- 前駆体CSV保存/読込/配置を追加。
-- 周期表から生成元素を選択可能に変更。
-- 周期表は一覧を小型カード化し、詳細情報はホバー時の暗色ポップアップへ集約。
-- 周期表ダイアログは説明文・凡例・下部ボタンを省き、周期表全体を優先表示。
-- Supercell、真空層除去、セル軸傾き、slab 全体移動を整備。
-- 原子一覧PNG出力を追加し、解像度/DPI/背景/列数/原子数表示を選択可能に変更。
-- 遠景や Supercell 表示時の原子球サイズが不自然に揃わないよう調整。
-- アイコンと Windows launcher 配布を整備。
-- 文字なし・透過背景の分子ネットワーク風アイコンへ更新。
-- アイコン元ファイルを SVG 1 つに統一し、Windows ICO / PNG / macOS ICNS はビルド時生成に変更。
-- README / QUICKSTART / 配布手順を整理。
+- Windows 蜷代￠ Qt 繝阪う繝・ぅ繝・UI 繧帝・蟶・庄閭ｽ縺ｪ ZIP / 蜊倅ｽ・launcher 縺ｨ縺励※謨ｴ蛯吶・
+- POSCAR / CONTCAR / .vasp / .xyz / .cif / .pdb / .xsf / .json / .aseproj / .vesta 隱ｭ縺ｿ霎ｼ縺ｿ縺ｫ蟇ｾ蠢懊・
+- VESTA 鬚ｨ縺ｮ蜴溷ｭ占｡ｨ遉ｺ縲∬ｦ也せ謫堺ｽ懊∝次蟄宣∈謚槭・㍾縺ｪ繧企∈謚槭ｒ謨ｴ蛯吶・
+- Ctrl + 蟾ｦ繝峨Λ繝・げ縺ｧ螂･縺ｫ驥阪↑縺｣縺溷次蟄舌ｂ驕ｸ謚槫庄閭ｽ縺ｫ螟画峩縲・
+- Esc 縺ｧ驕ｸ謚櫁ｧ｣髯､蜿ｯ閭ｽ縺ｫ螟画峩縲・
+- 隍・焚驕ｸ謚樊凾縺ｮ逶ｴ荳・逶ｴ荳矩・鄂ｮ繧偵・∈謚槫・蜴溷ｭ舌∈荳諡ｬ驕ｩ逕ｨ縲・
+- 蜑埼ｧ・ｽ鼎SV菫晏ｭ・隱ｭ霎ｼ/驟咲ｽｮ繧定ｿｽ蜉縲・
+- 蜻ｨ譛溯｡ｨ縺九ｉ逕滓・蜈・ｴ繧帝∈謚槫庄閭ｽ縺ｫ螟画峩縲・
+- 蜻ｨ譛溯｡ｨ縺ｯ荳隕ｧ繧貞ｰ丞梛繧ｫ繝ｼ繝牙喧縺励∬ｩｳ邏ｰ諠・ｱ縺ｯ繝帙ヰ繝ｼ譎ゅ・證苓牡繝昴ャ繝励い繝・・縺ｸ髮・ｴ・・
+- 蜻ｨ譛溯｡ｨ繝繧､繧｢繝ｭ繧ｰ縺ｯ隱ｬ譏取枚繝ｻ蜃｡萓九・荳矩Κ繝懊ち繝ｳ繧堤怐縺阪∝捉譛溯｡ｨ蜈ｨ菴薙ｒ蜆ｪ蜈郁｡ｨ遉ｺ縲・
+- Supercell縲∫悄遨ｺ螻､髯､蜴ｻ縲√そ繝ｫ霆ｸ蛯ｾ縺阪《lab 蜈ｨ菴鍋ｧｻ蜍輔ｒ謨ｴ蛯吶・
+- 蜴溷ｭ蝉ｸ隕ｧPNG蜃ｺ蜉帙ｒ霑ｽ蜉縺励∬ｧ｣蜒丞ｺｦ/DPI/閭梧勹/蛻玲焚/蜴溷ｭ先焚陦ｨ遉ｺ繧帝∈謚槫庄閭ｽ縺ｫ螟画峩縲・
+- 驕譎ｯ繧・Supercell 陦ｨ遉ｺ譎ゅ・蜴溷ｭ千帥繧ｵ繧､繧ｺ縺御ｸ崎・辟ｶ縺ｫ謠・ｏ縺ｪ縺・ｈ縺・ｪｿ謨ｴ縲・
+- 繧｢繧､繧ｳ繝ｳ縺ｨ Windows launcher 驟榊ｸ・ｒ謨ｴ蛯吶・
+- 譁・ｭ励↑縺励・騾城℃閭梧勹縺ｮ蛻・ｭ舌ロ繝・ヨ繝ｯ繝ｼ繧ｯ鬚ｨ繧｢繧､繧ｳ繝ｳ縺ｸ譖ｴ譁ｰ縲・
+- 繧｢繧､繧ｳ繝ｳ蜈・ヵ繧｡繧､繝ｫ繧・SVG 1 縺､縺ｫ邨ｱ荳縺励仝indows ICO / PNG / macOS ICNS 縺ｯ繝薙Ν繝画凾逕滓・縺ｫ螟画峩縲・
+- README / QUICKSTART / 驟榊ｸ・焔鬆・ｒ謨ｴ逅・・

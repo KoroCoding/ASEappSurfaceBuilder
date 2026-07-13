@@ -646,7 +646,7 @@ QVector<DftParameterSpec> DftParameterRegistry::specsForCode(DftCode code, const
         out << spec(code, "scf", "SolutionMethod", "SolutionMethod", "choice", "", "diagon", "Kangawa/Miyaguchi neutral SIESTA slab presetのSCF解法。", o++, false, false, {"diagon", "OrderN"});
         out << spec(code, "scf", "MaxSCFIterations", "MaxSCFIterations", "int", "", "1000", "SCF最大反復数。neutral FIRST presetでは1000を明示します。", o++, false, false);
         out << spec(code, "scf", "SCF.MustConverge", "SCF.MustConverge", "bool", "", "T", "SCF未収束をエラー扱いにします。", o++, false, true, {"T", "F"});
-        out << spec(code, "scf", "DM.Tolerance", "DM.Tolerance", "string", "", "1.d-4", "密度行列収束閾値。neutral FIRST presetでは1.d-4を明示します。", o++, false, false);
+        out << spec(code, "scf", "DM.Tolerance", "DM.Tolerance", "string", "", "1.d-5", "密度行列収束閾値。neutral FIRST presetでは1.d-5を明示します。", o++, false, false);
         out << spec(code, "scf", "DM.MixingWeight", "DM.MixingWeight", "double", "", "0.03", "密度行列mixing weight。neutral FIRST presetでは0.03を明示します。", o++, false, false);
         out << spec(code, "scf", "DM.NumberPulay", "DM.NumberPulay", "int", "", "8", "Pulay mixing履歴数。neutral FIRST presetでは8を明示します。", o++, false, false);
         out << spec(code, "scf", "ElectronicTemperature", "ElectronicTemperature", "string", "", "300 K", "電子温度。neutral FIRST presetでは300 Kを明示します。", o++, false, false);
@@ -654,13 +654,13 @@ QVector<DftParameterSpec> DftParameterRegistry::specsForCode(DftCode code, const
         out << spec(code, "relaxation", "MD.TypeOfRun", "MD.TypeOfRun", "choice", "", "CG", "構造緩和方式。slab緩和ではCG。", o++, false, false, {"CG", "Broyden", "Verlet"});
         out << spec(code, "relaxation", "MD.VariableCell", "MD.VariableCell", "bool", "", "F", "セルも動かすか。slabでは通常F、bulkではT。", o++, false, false, {"T", "F"});
         out << spec(code, "relaxation", "MD.Steps", "MD.Steps", "int", "", "500", "イオン緩和ステップ数。", o++);
-        out << spec(code, "relaxation", "MD.MaxForceTol", "MD.MaxForceTol", "double", "eV/Ang", "0.01", "最大力の収束閾値。", o++);
-        out << spec(code, "relaxation", "MD.MaxDispl", "MD.MaxDispl", "double", "Ang", "0.05", "1ステップあたり最大変位。", o++);
+        out << spec(code, "relaxation", "MD.MaxForceTol", "MD.MaxForceTol", "double", "eV/Ang", "0.001", "最大力の収束閾値。", o++);
+        out << spec(code, "relaxation", "MD.MaxDispl", "MD.MaxDispl", "double", "Ang", "0.03", "1ステップあたり最大変位。", o++);
         out << spec(code, "relaxation", "MD.MaxStressTol", "MD.MaxStressTol", "double", "GPa", "", "bulk variable cell時の応力閾値。", o++, false, true);
         out << spec(code, "relaxation", "GeometryMustConverge", "GeometryMustConverge", "bool", "", "T", "緩和が収束しない場合の終了扱い。", o++, false, false, {"T", "F"});
         out << spec(code, "kpoints", "kgrid", "kgrid", "string", "", "3 3 1", "Monkhorst-Pack k点。slabでは3 3 1。", o++, true);
-        out << spec(code, "species", "MeshCutoff", "MeshCutoff", "double", "Ry", "410", "Kangawa profileではxc.fdf由来の期待値410 Ry。", o++, false, true);
-        out << spec(code, "species", "xc.functional", "xc.functional", "string", "", "GGA", "xc.fdfから抽出される交換相関functional。", o++, false, true);
+        out << spec(code, "species", "MeshCutoff", "MeshCutoff", "double", "Ry", "500", "Kangawa profileではxc_500.fdf由来の期待値500 Ry。", o++, false, true);
+        out << spec(code, "species", "xc.functional", "xc.functional", "string", "", "GGA", "xc_500.fdfから抽出される交換相関functional。", o++, false, true);
         out << spec(code, "species", "xc.authors", "xc.authors", "string", "", "PBEJsJrLO", "Kangawa profileのxc.authors期待値。", o++, false, true);
         out << spec(code, "output", "coordinate_precision", "coordinate_precision", "choice", "digits", "10", "原子座標出力の小数桁数。既定10桁。", o++, true, false, precisionValues);
         out << spec(code, "output", "cell_precision", "cell_precision", "choice", "digits", "10", "セルベクトル出力の小数桁数。既定10桁。", o++, true, false, precisionValues);
@@ -717,7 +717,7 @@ DftSettings DftParameterRegistry::defaultSettings(DftCode code, const QString& v
         s.moduleName = s.version == QStringLiteral("5.4.2") ? QStringLiteral("siesta/5.4.2-mpi") : QStringLiteral("siesta/4.1.5-mpi");
         s.includeXcFdf = true;
         s.standaloneInline = false;
-        s.xcFdfPath = QStringLiteral("xc.fdf");
+        s.xcFdfPath = QStringLiteral("xc_500.fdf");
         s.pseudoDir = QStringLiteral("../potential");
         s.siestaSpecies = kangawaSiestaSpecies();
     } else {
@@ -741,13 +741,14 @@ void DftParameterRegistry::applyCalculationModeDefaults(DftSettings* s, const QS
         setParameterValue(s, "siesta.scf.SolutionMethod", "diagon", DftParameterSource::ProjectProfile);
         setParameterValue(s, "siesta.scf.MaxSCFIterations", "1000", DftParameterSource::ProjectProfile);
         setParameterValue(s, "siesta.scf.SCF.MustConverge", "T", DftParameterSource::ProjectProfile);
-        setParameterValue(s, "siesta.scf.DM.Tolerance", "1.d-4", DftParameterSource::ProjectProfile);
+        setParameterValue(s, "siesta.scf.DM.Tolerance", "1.d-5", DftParameterSource::ProjectProfile);
         setParameterValue(s, "siesta.scf.DM.MixingWeight", "0.03", DftParameterSource::ProjectProfile);
         setParameterValue(s, "siesta.scf.DM.NumberPulay", "8", DftParameterSource::ProjectProfile);
         setParameterValue(s, "siesta.scf.ElectronicTemperature", "300 K", DftParameterSource::ProjectProfile);
         setParameterValue(s, "siesta.relaxation.MD.TypeOfRun", "CG", DftParameterSource::ProjectProfile);
         setParameterValue(s, "siesta.relaxation.MD.Steps", "500", DftParameterSource::ProjectProfile);
-        setParameterValue(s, "siesta.relaxation.MD.MaxDispl", "0.05", DftParameterSource::ProjectProfile);
+        setParameterValue(s, "siesta.relaxation.MD.MaxForceTol", "0.001", DftParameterSource::ProjectProfile);
+        setParameterValue(s, "siesta.relaxation.MD.MaxDispl", "0.03", DftParameterSource::ProjectProfile);
         setParameterValue(s, "siesta.relaxation.GeometryMustConverge", "T", DftParameterSource::ProjectProfile);
         if (mode == "charged_slab_electron_added" || mode == "charged_slab_electron_removed") {
             setParameterValue(s, "siesta.charge_spin.NetCharge", mode.endsWith("added") ? "-0.25" : "0.25", DftParameterSource::ProjectProfile);
@@ -755,7 +756,7 @@ void DftParameterRegistry::applyCalculationModeDefaults(DftSettings* s, const QS
             setParameterValue(s, "siesta.charge_spin.Spin.Fix", "F", DftParameterSource::ProjectProfile);
             setParameterValue(s, "siesta.charge_spin.Spin.Total", "", DftParameterSource::ProjectProfile);
             setParameterValue(s, "siesta.relaxation.MD.VariableCell", "F", DftParameterSource::ProjectProfile);
-            setParameterValue(s, "siesta.relaxation.MD.MaxForceTol", "0.01", DftParameterSource::ProjectProfile);
+            setParameterValue(s, "siesta.relaxation.MD.MaxForceTol", "0.001", DftParameterSource::ProjectProfile);
             setParameterValue(s, "siesta.kpoints.kgrid", "3 3 1", DftParameterSource::ProjectProfile);
         } else if (mode == "bulk_variable_cell") {
             setParameterValue(s, "siesta.charge_spin.NetCharge", "0.0", DftParameterSource::ProjectProfile);
@@ -786,7 +787,7 @@ void DftParameterRegistry::applyCalculationModeDefaults(DftSettings* s, const QS
             setParameterValue(s, "siesta.charge_spin.Spin.Fix", "", DftParameterSource::ProjectProfile);
             setParameterValue(s, "siesta.charge_spin.Spin.Total", "", DftParameterSource::ProjectProfile);
             setParameterValue(s, "siesta.relaxation.MD.VariableCell", "F", DftParameterSource::ProjectProfile);
-            setParameterValue(s, "siesta.relaxation.MD.MaxForceTol", "0.01", DftParameterSource::ProjectProfile);
+            setParameterValue(s, "siesta.relaxation.MD.MaxForceTol", "0.001", DftParameterSource::ProjectProfile);
             setParameterValue(s, "siesta.kpoints.kgrid", "3 3 1", DftParameterSource::ProjectProfile);
         }
         return;
@@ -876,9 +877,9 @@ bool DftParameterRegistry::applyBuiltInProfile(const QString& profileName, DftSe
         s->schema = "siesta_fdf_4_1";
         s->includeXcFdf = true;
         s->standaloneInline = false;
-        s->xcFdfPath = "xc.fdf";
+        s->xcFdfPath = "xc_500.fdf";
         s->pseudoDir = "../potential";
-        s->fixedAtomMode = DftFixedAtomMode::FixBottomPseudoHPlusBottomMolecularLayer;
+        s->fixedAtomMode = DftFixedAtomMode::PreserveImportedFlags;
         s->trailingFlagInterpretation = DftTrailingFlagInterpretation::PreserveOrIgnoreUnknown;
         s->siestaSpecies = kangawaSiestaSpecies();
         applyCalculationModeDefaults(s, "neutral_slab");

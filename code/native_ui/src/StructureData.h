@@ -27,5 +27,8 @@ struct StructureData {
     std::vector<NativeAtom> atoms;
     QString trailingFlagInterpretation = QStringLiteral("preserve_or_ignore_unknown");
     QMap<int, QStringList> importedExtraColumns;
+    // True when the importer had to create a visualization-only bounding cell.
+    // Such a cell must not be used silently for simulation input conversion.
+    bool cellWasGenerated = false;
     bool dirty = false;
 };

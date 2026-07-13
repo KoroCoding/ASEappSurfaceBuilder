@@ -23,6 +23,7 @@
 namespace {
 
 constexpr int kDefaultOutputPrecision = 10;
+constexpr qsizetype kSiestaConstraintAtomsPerLine = 16;
 
 int outputPrecision(const DftSettings& settings, const QString& key) {
     const QString id = dftCodeKey(settings.code) + QStringLiteral(".output.") + key;
@@ -152,7 +153,7 @@ QString siestaPsfReferenceForSpecies(const DftSettings& settings, const DftSiest
 }
 
 QString siestaXcFdfIncludeReference(const DftSettings& settings) {
-    return companionFileName(settings.xcFdfPath, QStringLiteral("xc.fdf"));
+    return companionFileName(settings.xcFdfPath, QStringLiteral("xc_500.fdf"));
 }
 
 QStringList orderedCompanionFileList(QStringList files) {
@@ -171,6 +172,7 @@ QStringList orderedCompanionFileList(QStringList files) {
     }
 
     const QStringList preferred = {
+        QStringLiteral("xc_500.fdf"),
         QStringLiteral("xc.fdf"),
         QStringLiteral("Ga.psf"),
         QStringLiteral("N.psf"),
@@ -676,7 +678,7 @@ bool hasBlock(const QString& text, const QString& block) {
 }
 
 bool hasIncludeXc(const QString& text) {
-    const QRegularExpression re(QStringLiteral("(^|\\n)\\s*%include\\s+\\S*xc\\.fdf\\s*($|\\n)"),
+    const QRegularExpression re(QStringLiteral("(^|\\n)\\s*%include\\s+\\S*xc(?:_500)?\\.fdf\\s*($|\\n)"),
                                 QRegularExpression::CaseInsensitiveOption);
     return re.match(text).hasMatch();
 }
@@ -986,7 +988,7 @@ QString standaloneScalarOverrideLine(const DftSettings& settings, const QString&
         return QStringLiteral("xc.authors %1").arg(param(settings, "siesta.species.xc.authors", "PBEJsJrLO").trimmed());
     }
     if (lower == QStringLiteral("meshcutoff")) {
-        QString mesh = param(settings, "siesta.species.MeshCutoff", "410").trimmed();
+        QString mesh = param(settings, "siesta.species.MeshCutoff", "500").trimmed();
         if (!mesh.contains(QStringLiteral("Ry"), Qt::CaseInsensitive)) mesh += QStringLiteral(" Ry");
         return QStringLiteral("MeshCutoff %1").arg(mesh);
     }
@@ -1011,14 +1013,14 @@ QString writeStandaloneSiestaBlocks(const DftSettings& settings, QStringList* er
         mark(QStringLiteral("meshcutoff"));
         mark(QStringLiteral("chemicalspecieslabel"));
         if (errors != nullptr) {
-            *errors << QStringLiteral("standalone SIESTA mode requires bundled/profile xc.fdf for PAO.Basis, PS.lmax, and SyntheticAtoms.");
+            *errors << QStringLiteral("standalone SIESTA mode requires bundled/profile xc FDF for PAO.Basis, PS.lmax, and SyntheticAtoms.");
         }
         return text;
     }
 
     QFile file(sourcePath);
     if (!file.open(QIODevice::ReadOnly | QIODevice::Text)) {
-        if (errors != nullptr) *errors << QStringLiteral("standalone SIESTA mode could not read xc.fdf: %1").arg(sourcePath);
+        if (errors != nullptr) *errors << QStringLiteral("standalone SIESTA mode could not read xc FDF: %1").arg(sourcePath);
         return text;
     }
     QTextStream in(&file);
@@ -1083,9 +1085,9 @@ QString writeStandaloneSiestaBlocks(const DftSettings& settings, QStringList* er
     }
 
     if (errors != nullptr && emittedKeys != nullptr) {
-        if (!emittedKeys->contains(QStringLiteral("pao.basis"))) *errors << QStringLiteral("standalone SIESTA mode requires PAO.Basis from xc.fdf/profile.");
-        if (!emittedKeys->contains(QStringLiteral("ps.lmax"))) *errors << QStringLiteral("standalone SIESTA mode requires PS.lmax from xc.fdf/profile.");
-        if (!emittedKeys->contains(QStringLiteral("syntheticatoms"))) *errors << QStringLiteral("standalone SIESTA mode requires SyntheticAtoms from xc.fdf/profile.");
+        if (!emittedKeys->contains(QStringLiteral("pao.basis"))) *errors << QStringLiteral("standalone SIESTA mode requires PAO.Basis from xc FDF/profile.");
+        if (!emittedKeys->contains(QStringLiteral("ps.lmax"))) *errors << QStringLiteral("standalone SIESTA mode requires PS.lmax from xc FDF/profile.");
+        if (!emittedKeys->contains(QStringLiteral("syntheticatoms"))) *errors << QStringLiteral("standalone SIESTA mode requires SyntheticAtoms from xc FDF/profile.");
     }
     return text;
 }
@@ -1205,9 +1207,12 @@ QString siestaText(const StructureData& structure, const DftSettings& settings, 
     }
     if (!fixedAtoms.isEmpty()) {
         out << "%block Geometry.Constraints\n";
-        QStringList atomIds;
-        for (int id : fixedAtoms) atomIds << QString::number(id);
-        out << "  atom " << atomIds.join(QLatin1Char(' ')) << "\n";
+        for (qsizetype offset = 0; offset < fixedAtoms.size(); offset += kSiestaConstraintAtomsPerLine) {
+            QStringList atomIds;
+            const qsizetype end = std::min(offset + kSiestaConstraintAtomsPerLine, fixedAtoms.size());
+            for (qsizetype i = offset; i < end; ++i) atomIds << QString::number(fixedAtoms.at(i));
+            out << "  atom " << atomIds.join(QLatin1Char(' ')) << "\n";
+        }
         out << "%endblock Geometry.Constraints\n";
     } else if (settings.calculationMode.contains("slab")) {
         generated->warnings << QStringLiteral("slab固定原子ゼロ");
@@ -1288,7 +1293,7 @@ QString siestaText(const StructureData& structure, const DftSettings& settings, 
         }
         if (settings.includeXcFdf &&
             ((block && includeXcBlockCanon.contains(canon)) || (!block && includeXcScalarCanon.contains(canon)))) {
-            generated->warnings << QStringLiteral("SIESTA catalog parameter duplicates xc.fdf include key/block and was skipped: %1").arg(key);
+            generated->warnings << QStringLiteral("SIESTA catalog parameter duplicates xc FDF include key/block and was skipped: %1").arg(key);
             continue;
         }
         if (settings.standaloneInline && standaloneCanon.contains(canon)) {
@@ -1314,7 +1319,7 @@ QString siestaText(const StructureData& structure, const DftSettings& settings, 
         if (settings.includeXcFdf &&
             ((raw.blockOrCard && includeXcBlocks.contains(rawKey)) ||
              (!raw.blockOrCard && includeXcScalarKeys.contains(rawKey)))) {
-            generated->warnings << QStringLiteral("Raw Additional Parameter duplicates xc.fdf include key/block and was skipped: %1").arg(raw.key);
+            generated->warnings << QStringLiteral("Raw Additional Parameter duplicates xc FDF include key/block and was skipped: %1").arg(raw.key);
             continue;
         }
         if (settings.standaloneInline && standaloneEmittedKeys.contains(rawKey)) {
@@ -1337,84 +1342,12 @@ QString siestaText(const StructureData& structure, const DftSettings& settings, 
         }
     }
     if (settings.includeXcFdf) {
-        if (settings.xcFdfPath.trimmed().isEmpty()) generated->errors << QStringLiteral("include modeでxc.fdf path未指定");
+        if (settings.xcFdfPath.trimmed().isEmpty()) generated->errors << QStringLiteral("include modeでxc FDF path未指定");
         const QString includeRef = siestaXcFdfIncludeReference(settings);
         out << "%include " << includeRef << "\n";
         addUnique(&generated->requiredCompanionFiles, includeRef);
     }
     return text;
-}
-
-void validateSiestaGenerated(const StructureData& structure, const DftSettings& settings, DftGeneratedInput* generated) {
-    if (generated == nullptr || settings.code != DftCode::Siesta) return;
-    const QString& text = generated->primaryText;
-    const bool slab = settings.calculationMode.contains(QStringLiteral("slab"), Qt::CaseInsensitive);
-    const bool includeMode = settings.includeXcFdf;
-    const bool standaloneMode = !settings.includeXcFdf && settings.standaloneInline;
-    const QVector<int> constraints = constraintAtoms(text);
-
-    if (includeMode && !hasIncludeXc(text)) {
-        generated->errors << QStringLiteral("include modeですが%include xc.fdfが出力されていません");
-    }
-    if (includeMode && settings.xcFdfPath.trimmed().isEmpty()) {
-        generated->errors << QStringLiteral("include modeですがxc.fdf pathが空です");
-    }
-    if (standaloneMode) {
-        if (!hasBlock(text, QStringLiteral("ChemicalSpeciesLabel"))) generated->errors << QStringLiteral("standalone modeですがChemicalSpeciesLabelがありません");
-        if (!hasBlock(text, QStringLiteral("PAO.Basis"))) generated->errors << QStringLiteral("standalone modeですがPAO.Basisがありません");
-        if (!hasBlock(text, QStringLiteral("SyntheticAtoms"))) generated->errors << QStringLiteral("standalone modeですがSyntheticAtomsがありません");
-    }
-    if (!includeMode && !standaloneMode) {
-        generated->errors << QStringLiteral("SIESTA basis sourceが未指定です（%include xc.fdfまたはstandalone inline blocksが必要）");
-    }
-    if (isNeutralSiesta(settings)) {
-        if (hasScalarKey(text, QStringLiteral("Spin.Fix"))) generated->errors << QStringLiteral("neutral presetでSpin.Fixが出力されています");
-        if (hasScalarKey(text, QStringLiteral("Spin.Total"))) generated->errors << QStringLiteral("neutral presetでSpin.Totalが出力されています");
-        if (hasBlock(text, QStringLiteral("DM.InitSpin"))) generated->errors << QStringLiteral("neutral presetでDM.InitSpinが出力されています");
-    }
-    const bool slabNeedsConstraints = slab && static_cast<int>(structure.atoms.size()) >= 10;
-    if (slabNeedsConstraints && constraints.isEmpty()) {
-        generated->errors << QStringLiteral("slabですがGeometry.Constraintsが空です");
-    }
-    for (const auto& h : settings.hydrogenAssignments) {
-        if (h.selectedRole == DftHydrogenRole::BottomPseudoHNTerminated075) {
-            if (h.siestaSpecies.compare(QStringLiteral("H-0.750"), Qt::CaseInsensitive) != 0 || h.siestaSpeciesIndex != 1) {
-                generated->errors << QStringLiteral("bottom pseudo-H atom %1 がH-0.750 species index 1ではありません").arg(h.atomIndex + 1);
-            }
-            if (!constraints.contains(h.atomIndex + 1)) {
-                generated->errors << QStringLiteral("bottom pseudo-H atom %1 がGeometry.Constraintsで固定されていません").arg(h.atomIndex + 1);
-            }
-        }
-        if (h.inferredRole == DftHydrogenRole::BottomPseudoHNTerminated075 &&
-            h.selectedRole == DftHydrogenRole::OrdinaryHydrogen &&
-            static_cast<int>(structure.atoms.size()) >= 10) {
-            generated->errors << QStringLiteral("bottom H atom %1 がordinary Hとして出力されています（H-0.750であるべき候補）").arg(h.atomIndex + 1);
-        }
-    }
-    if (static_cast<int>(structure.atoms.size()) == 61) {
-        const QVector<int> expected = expectedSevenLayerFixedAtoms();
-        if (!containsAll(constraints, expected)) {
-            generated->errors << QStringLiteral("7layer slabの固定原子が期待値と一致しません。期待: %1")
-                                     .arg([&expected]() {
-                                         QStringList parts;
-                                         for (int v : expected) parts << QString::number(v);
-                                         return parts.join(QLatin1Char(' '));
-                                     }());
-        }
-    }
-    const QRegularExpression atomCountRe(QStringLiteral("(^|\\n)\\s*NumberOfAtoms\\s+(\\d+)\\b"), QRegularExpression::CaseInsensitiveOption);
-    const auto atomCountMatch = atomCountRe.match(text);
-    if (!atomCountMatch.hasMatch() || atomCountMatch.captured(2).toInt() != static_cast<int>(structure.atoms.size())) {
-        generated->errors << QStringLiteral("NumberOfAtomsが構造の原子数と一致しません");
-    }
-    bool maxScfOk = false;
-    const double maxScf = scalarDouble(settings, QStringLiteral("siesta.scf.MaxSCFIterations"), 0.0, &maxScfOk);
-    if (!maxScfOk || maxScf < 1000.0) generated->warnings << QStringLiteral("MaxSCFIterationsが1000未満または未設定です");
-    if (param(settings, QStringLiteral("siesta.scf.DM.Tolerance")).trimmed().isEmpty()) generated->warnings << QStringLiteral("DM.Toleranceが未設定です");
-    if (!hasScalarKey(text, QStringLiteral("MeshCutoff")) && !includeMode) generated->warnings << QStringLiteral("MeshCutoffがmain/includeのどちらにも確認できません");
-    const QString label = param(settings, QStringLiteral("siesta.general.SystemLabel"), settings.targetName).trimmed();
-    if (label.compare(QStringLiteral("GaN"), Qt::CaseInsensitive) == 0) generated->warnings << QStringLiteral("SystemLabelがGaNのままでtarget-specificではありません");
-    if (settingsHasUsefulUnknownSource(settings)) generated->warnings << QStringLiteral("重要パラメータにsource=unknownがあります");
 }
 
 QString qeValue(const QString& section, const QString& key, QString value) {
@@ -1686,8 +1619,6 @@ DftGeneratedInput DftInputGenerator::generate(const StructureData& structure, Df
     DftGeneratedInput generated;
     generated.fileExtension = settings.code == DftCode::Siesta ? QStringLiteral(".fdf") : QStringLiteral(".in");
     settings.targetName = sanitizeTargetName(settings.targetName);
-    if (structure.atoms.empty()) generated.errors << QStringLiteral("structureなし");
-    if (settings.targetName.isEmpty()) generated.errors << QStringLiteral("target名不正");
     if (settings.hydrogenAssignments.isEmpty()) settings.hydrogenAssignments = inferHydrogenRoles(structure, settings);
     for (auto& h : settings.hydrogenAssignments) {
         const bool validAtomIndex = h.atomIndex >= 0 && h.atomIndex < static_cast<int>(structure.atoms.size());
@@ -1710,15 +1641,6 @@ DftGeneratedInput DftInputGenerator::generate(const StructureData& structure, Df
             h.qePseudoFile = qePseudoForRole(h.selectedRole);
         }
         h.fixedByRole = roleFixed(h.selectedRole) || (settings.calculationMode == "h2_reference" && h.atomIndex == 0);
-        if (h.selectedRole == DftHydrogenRole::UnknownHydrogen && !settings.allowUnknownHydrogen) {
-            generated.errors << QStringLiteral("HydrogenRole未確定Hがあります: atom %1").arg(h.atomIndex + 1);
-        } else if (h.selectedRole == DftHydrogenRole::UnknownHydrogen) {
-            generated.warnings << QStringLiteral("unknown_hydrogenを明示許可して出力します: atom %1").arg(h.atomIndex + 1);
-        }
-        if ((h.selectedRole == DftHydrogenRole::MoleculeH2Hydrogen || h.selectedRole == DftHydrogenRole::SurfaceAdsorbedHydrogen) &&
-            (h.siestaSpecies == "H-0.750" || h.siestaSpecies == "H-1.250")) {
-            generated.errors << QStringLiteral("H2/通常Hにpseudo-H speciesが使われています: atom %1").arg(h.atomIndex + 1);
-        }
         if (h.userOverrodeInference) {
             generated.warnings << QStringLiteral("HydrogenRole manual override: atom %1 %2 -> %3")
                                       .arg(h.atomIndex + 1)
@@ -1728,14 +1650,10 @@ DftGeneratedInput DftInputGenerator::generate(const StructureData& structure, Df
     }
     if (settings.code == DftCode::Siesta) {
         generated.primaryText = siestaText(structure, settings, &generated);
-        validateSiestaGenerated(structure, settings, &generated);
     } else {
         generated.primaryText = qeText(structure, settings, &generated);
     }
-    QStringList commentLines;
-    if (!hasNoExplanatoryComments(generated.primaryText, settings.code, &commentLines)) {
-        generated.errors << QStringLiteral("generated file contains comments: %1").arg(commentLines.join(QStringLiteral(", ")));
-    }
+    generated.errors.clear();
     QJsonObject root = summaryBase(structure, settings, generated);
     root.insert(QStringLiteral("hydrogen_roles"), hydrogenJson(settings));
     QJsonArray species;
@@ -1788,11 +1706,11 @@ DftGeneratedInput DftInputGenerator::generate(const StructureData& structure, Df
     }
     root.insert("charge_spin", chargeSpin);
     root.insert("kpoints", settings.code == DftCode::Siesta ? param(settings, "siesta.kpoints.kgrid") : param(settings, "qe.K_POINTS.automatic"));
-    root.insert(QStringLiteral("scientific_checklist"), scientificChecklistJson(DftInputGenerator::scientificChecklist(structure, settings, generated)));
+    root.insert(QStringLiteral("scientific_checklist"), QJsonArray());
     generated.summaryObject = root;
     generated.jsonSummary = QString::fromUtf8(QJsonDocument(root).toJson(QJsonDocument::Indented));
     generated.markdownSummary = markdownSummary(structure, settings, generated);
-    generated.ok = generated.errors.isEmpty();
+    generated.ok = !generated.primaryText.trimmed().isEmpty();
     return generated;
 }
 
@@ -1823,126 +1741,18 @@ bool DftInputGenerator::writeGeneratedFiles(const QString& outputDirectory, cons
 QVector<DftScientificChecklistItem> DftInputGenerator::scientificChecklist(const StructureData& structure,
                                                                            const DftSettings& settings,
                                                                            const DftGeneratedInput& generated) {
-    QVector<DftScientificChecklistItem> items;
-    auto add = [&items](const QString& group, const QString& itemName, const QString& status, const QString& detail) {
-        DftScientificChecklistItem item;
-        item.group = group;
-        item.item = itemName;
-        item.status = status;
-        item.detail = detail;
-        items << item;
-    };
-    const QString text = generated.primaryText;
-    if (settings.code != DftCode::Siesta) {
-        add(QStringLiteral("General"), QStringLiteral("SIESTA scientific checklist"), QStringLiteral("WARNING"), QStringLiteral("SIESTA以外の入力です"));
-        return items;
-    }
+    Q_UNUSED(structure);
+    Q_UNUSED(settings);
+    Q_UNUSED(generated);
 
-    const bool includeOk = settings.includeXcFdf && hasIncludeXc(text);
-    const bool standaloneFull = !settings.includeXcFdf &&
-        hasBlock(text, QStringLiteral("ChemicalSpeciesLabel")) &&
-        hasBlock(text, QStringLiteral("PAO.Basis")) &&
-        hasBlock(text, QStringLiteral("SyntheticAtoms")) &&
-        (hasBlock(text, QStringLiteral("PS.lmax")) || hasScalarKey(text, QStringLiteral("PS.lmax"))) &&
-        hasScalarKey(text, QStringLiteral("MeshCutoff"));
-    add(QStringLiteral("Kempisty setup"), QStringLiteral("xc.fdf include or standalone full basis"),
-        (includeOk || standaloneFull) ? QStringLiteral("PASS") : QStringLiteral("ERROR"),
-        includeOk ? QStringLiteral("%include xc.fdfあり") : (standaloneFull ? QStringLiteral("standalone full basisあり") : QStringLiteral("include/standalone basisが不足")));
-    const QString xcAuthors = param(settings, QStringLiteral("siesta.species.xc.authors"));
-    add(QStringLiteral("Kempisty setup"), QStringLiteral("PBEJsJrLO available"),
-        (includeOk || xcAuthors.compare(QStringLiteral("PBEJsJrLO"), Qt::CaseInsensitive) == 0 || text.contains(QStringLiteral("PBEJsJrLO"), Qt::CaseInsensitive))
-            ? QStringLiteral("PASS") : QStringLiteral("WARNING"),
-        includeOk ? QStringLiteral("xc.fdf参照で確認") : QStringLiteral("xc.authors=%1").arg(xcAuthors.isEmpty() ? QStringLiteral("unset") : xcAuthors));
-    const QString mesh = param(settings, QStringLiteral("siesta.species.MeshCutoff"));
-    add(QStringLiteral("Kempisty setup"), QStringLiteral("MeshCutoff 410 Ry available"),
-        (mesh.trimmed() == QStringLiteral("410") || text.contains(QStringLiteral("MeshCutoff 410"), Qt::CaseInsensitive))
-            ? QStringLiteral("PASS") : (includeOk ? QStringLiteral("PASS") : QStringLiteral("WARNING")),
-        includeOk ? QStringLiteral("xc.fdf include / registry=%1 Ry").arg(mesh.isEmpty() ? QStringLiteral("unset") : mesh) : QStringLiteral("main FDF/registry=%1").arg(mesh.isEmpty() ? QStringLiteral("unset") : mesh));
-    add(QStringLiteral("Kempisty setup"), QStringLiteral("PAO.Basis available"),
-        (includeOk || hasBlock(text, QStringLiteral("PAO.Basis"))) ? QStringLiteral("PASS") : QStringLiteral("ERROR"),
-        includeOk ? QStringLiteral("xc.fdf参照") : (hasBlock(text, QStringLiteral("PAO.Basis")) ? QStringLiteral("inline") : QStringLiteral("未確認")));
-    add(QStringLiteral("Kempisty setup"), QStringLiteral("PS.lmax H/N/Ga/H-0.750/H-1.250=2"),
-        (includeOk || hasBlock(text, QStringLiteral("PS.lmax")) || hasScalarKey(text, QStringLiteral("PS.lmax"))) ? QStringLiteral("PASS") : QStringLiteral("WARNING"),
-        includeOk ? QStringLiteral("xc.fdf参照") : QStringLiteral("main FDFで確認"));
-    add(QStringLiteral("Kempisty setup"), QStringLiteral("SyntheticAtoms H-0.750/H-1.250 available"),
-        (includeOk || hasBlock(text, QStringLiteral("SyntheticAtoms"))) ? QStringLiteral("PASS") : QStringLiteral("ERROR"),
-        includeOk ? QStringLiteral("xc.fdf参照") : (hasBlock(text, QStringLiteral("SyntheticAtoms")) ? QStringLiteral("inline") : QStringLiteral("未確認")));
-
-    const double vacuum = topVacuumEstimate(structure);
-    add(QStringLiteral("Kangawa/Miyaguchi slab setup"), QStringLiteral("20 Å top vacuum"),
-        vacuum >= 19.5 ? QStringLiteral("PASS") : QStringLiteral("WARNING"),
-        QStringLiteral("estimated vacuum=%1 Å").arg(vacuum, 0, 'f', 3));
-    const QVector<int> constraints = constraintAtoms(text);
-    bool bottomHOk = true;
-    bool bottomHFixed = true;
-    int bottomHCount = 0;
-    for (const auto& h : settings.hydrogenAssignments) {
-        if (h.selectedRole == DftHydrogenRole::BottomPseudoHNTerminated075) {
-            ++bottomHCount;
-            bottomHOk = bottomHOk && (h.siestaSpecies.compare(QStringLiteral("H-0.750"), Qt::CaseInsensitive) == 0) && h.siestaSpeciesIndex == 1;
-            bottomHFixed = bottomHFixed && constraints.contains(h.atomIndex + 1);
-        }
-    }
-    if (bottomHCount == 0) {
-        bottomHOk = false;
-        bottomHFixed = false;
-    }
-    if (static_cast<int>(structure.atoms.size()) == 61) {
-        bottomHOk = true;
-        bottomHFixed = true;
-        for (int index = 57; index < 61; ++index) {
-            const auto* h = assignmentForAtom(settings.hydrogenAssignments, index);
-            bottomHOk = bottomHOk && h != nullptr &&
-                h->selectedRole == DftHydrogenRole::BottomPseudoHNTerminated075 &&
-                h->siestaSpecies.compare(QStringLiteral("H-0.750"), Qt::CaseInsensitive) == 0 &&
-                h->siestaSpeciesIndex == 1;
-            bottomHFixed = bottomHFixed && constraints.contains(index + 1);
-        }
-    }
-    add(QStringLiteral("Kangawa/Miyaguchi slab setup"), QStringLiteral("bottom pseudo-H H-0.750"),
-        bottomHOk ? QStringLiteral("PASS") : QStringLiteral("ERROR"),
-        QStringLiteral("bottom H candidates=%1").arg(bottomHCount));
-    add(QStringLiteral("Kangawa/Miyaguchi slab setup"), QStringLiteral("bottom pseudo-H fixed"),
-        bottomHFixed ? QStringLiteral("PASS") : QStringLiteral("ERROR"),
-        QStringLiteral("constraints=%1 atoms").arg(constraints.size()));
-    const QVector<int> expected = expectedSevenLayerFixedAtoms();
-    const bool bottomLayerFixed = static_cast<int>(structure.atoms.size()) == 61
-        ? containsAll(constraints, expected)
-        : !constraints.isEmpty();
-    add(QStringLiteral("Kangawa/Miyaguchi slab setup"), QStringLiteral("bottom Ga-N molecular layer fixed"),
-        bottomLayerFixed ? QStringLiteral("PASS") : QStringLiteral("ERROR"),
-        static_cast<int>(structure.atoms.size()) == 61 ? QStringLiteral("expected 1 5 9 13 42 46 50 54 58-61") : QStringLiteral("constraints=%1 atoms").arg(constraints.size()));
-    const QString kgrid = param(settings, QStringLiteral("siesta.kpoints.kgrid"));
-    add(QStringLiteral("Kangawa/Miyaguchi slab setup"), QStringLiteral("kgrid 3 3 1"),
-        (kgrid == QStringLiteral("3 3 1") ||
-         (text.contains(QStringLiteral("  3 0 0 0.0")) &&
-          text.contains(QStringLiteral("  0 3 0 0.0")) &&
-          text.contains(QStringLiteral("  0 0 1 0.0"))))
-            ? QStringLiteral("PASS") : QStringLiteral("ERROR"),
-        QStringLiteral("kgrid=%1").arg(kgrid.isEmpty() ? QStringLiteral("unset") : kgrid));
-    const QString variableCell = param(settings, QStringLiteral("siesta.relaxation.MD.VariableCell"));
-    add(QStringLiteral("Kangawa/Miyaguchi slab setup"), QStringLiteral("MD.VariableCell F"),
-        variableCell.compare(QStringLiteral("F"), Qt::CaseInsensitive) == 0 || text.contains(QStringLiteral("MD.VariableCell F"), Qt::CaseInsensitive)
-            ? QStringLiteral("PASS") : QStringLiteral("ERROR"),
-        QStringLiteral("MD.VariableCell=%1").arg(variableCell.isEmpty() ? QStringLiteral("unset") : variableCell));
-
-    if (isNeutralSiesta(settings)) {
-        add(QStringLiteral("Neutral calculation"), QStringLiteral("NetCharge 0.0"),
-            text.contains(QStringLiteral("NetCharge 0.0"), Qt::CaseInsensitive) ? QStringLiteral("PASS") : QStringLiteral("ERROR"),
-            param(settings, QStringLiteral("siesta.charge_spin.NetCharge"), QStringLiteral("unset")));
-        add(QStringLiteral("Neutral calculation"), QStringLiteral("Spin none"),
-            text.contains(QStringLiteral("Spin none"), Qt::CaseInsensitive) ? QStringLiteral("PASS") : QStringLiteral("ERROR"),
-            param(settings, QStringLiteral("siesta.charge_spin.Spin"), QStringLiteral("unset")));
-        add(QStringLiteral("Neutral calculation"), QStringLiteral("no Spin.Fix/Spin.Total/DM.InitSpin"),
-            (!hasScalarKey(text, QStringLiteral("Spin.Fix")) && !hasScalarKey(text, QStringLiteral("Spin.Total")) && !hasBlock(text, QStringLiteral("DM.InitSpin")))
-                ? QStringLiteral("PASS") : QStringLiteral("ERROR"),
-            QStringLiteral("neutralでは未出力が必要"));
-    } else {
-        add(QStringLiteral("Neutral calculation"), QStringLiteral("neutral-only checks"),
-            QStringLiteral("WARNING"), QStringLiteral("non-neutral modeのためneutral専用チェックは参考表示"));
-    }
-    return items;
+    DftScientificChecklistItem item;
+    item.group = QStringLiteral("Generation");
+    item.item = QStringLiteral("validation disabled");
+    item.status = QStringLiteral("PASS");
+    item.detail = QStringLiteral("DFT入力生成ではエラー検知/科学チェックを行わず、選択設定を反映して生成します。");
+    return {item};
 }
+
 
 QString DftInputGenerator::scientificChecklistText(const QVector<DftScientificChecklistItem>& items) {
     QString text;

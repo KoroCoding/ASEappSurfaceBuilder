@@ -26,4 +26,5 @@ public:
 
     std::optional<StructureData> load(const QString& path, QString* errorMessage = nullptr) const;
     std::optional<StructureData> load(const QString& path, QString* errorMessage, const StructureImportOptions& options) const;
+    std::optional<std::array<QVector3D, 3>> loadCellVectors(const QString& path, QString* errorMessage = nullptr) const;
 };

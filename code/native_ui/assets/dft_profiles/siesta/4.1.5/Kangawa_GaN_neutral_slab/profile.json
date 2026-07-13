@@ -9,13 +9,13 @@
   "structure_type": "surface_slab",
   "profile_family": "Kangawa_GaN_SIESTA_surface",
   "profile_sources": [
-    "Kempisty shared SIESTA xc.fdf is included by the main FDF by default; PSF files are resolved from ../potential on the supercomputer",
+    "Kempisty shared SIESTA xc_500.fdf is included by the main FDF by default; PSF files are resolved from ../potential on the supercomputer",
     "Miyaguchi/Kangawa slab convention: bottom pseudo-H + bottom molecular layer fixed, slab k-grid 3x3x1",
     "User confirmed current priority: neutral SIESTA slab calculation first; charged presets are intentionally excluded from this neutral-only package"
   ],
   "include_xc_fdf": {
     "default": true,
-    "xc_include_file": "xc.fdf",
+    "xc_include_file": "xc_500.fdf",
     "include_position": "main_fdf_include_line"
   },
   "standalone_inline": {
@@ -138,8 +138,8 @@
       "source": "project_default"
     },
     "DM.Tolerance": {
-      "value": "1.d-4",
-      "source": "project_default_from_SIESTA_bulk_reference"
+      "value": "1.d-5",
+      "source": "project_default_updated_by_user_request"
     },
     "DM.MixingWeight": {
       "value": 0.03,
@@ -172,12 +172,12 @@
       "source": "Miyaguchi_QE_slab_nstep_500_translated"
     },
     "MD.MaxForceTol": {
-      "value": "0.01 eV/Ang",
-      "source": "project_default_for_SIESTA_slab"
+      "value": "0.001 eV/Ang",
+      "source": "project_default_updated_by_user_request"
     },
     "MD.MaxDispl": {
-      "value": "0.05 Ang",
-      "source": "project_default_from_SIESTA_bulk_reference"
+      "value": "0.03 Ang",
+      "source": "project_default_updated_by_user_request"
     },
     "GeometryMustConverge": {
       "value": "T",
@@ -278,3 +278,4 @@
   ],
   "pseudopotential_directory": "../potential"
 }
+
